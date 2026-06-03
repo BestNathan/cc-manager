@@ -96,11 +96,27 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="claude-haiku-4-5-20251001"
 
 ## 安装(install.sh)
 
+支持 Linux 与 macOS(不支持 Windows)。安装时**自适应探测**目标 bin 目录,不写死。
+
 1. 创建 `~/.cc-manager/profiles/` 与 `~/.cc-manager/template.env`(若不存在)。
-2. 将 `ccm` 软链到 `~/.local/bin/ccm`(若该目录不在 PATH,提示用户添加)。
+2. **选择 bin 目录**(详见下方算法),将 `ccm` 软链到 `<bin_dir>/ccm`。
 3. 安装 zsh 补全文件 `_ccm` 到 `~/.cc-manager/completions/`,并提示在 `~/.zshrc`
    中加入 `fpath` 与 `compinit`(或追加一行 source)。
-4. 不写入任何真实 token;不覆盖已存在的 profile。
+4. 不写入任何真实 token;不覆盖已存在的 profile;不主动调用 sudo。
+
+### bin 目录探测算法(跨 Linux/macOS)
+
+1. **显式覆盖**:`--bin-dir <path>` 或环境变量 `CCM_BIN_DIR` 优先于一切。
+2. **自动探测**:按优先级取第一个「已在 `$PATH` 中**且**可写」的目录:
+   1. `$HOME/.local/bin`(XDG / 用户级通用首选)
+   2. `$HOME/bin`
+   3. `$(brew --prefix)/bin`(若存在 Homebrew —— mac `/opt/homebrew/bin` 或 Linuxbrew,且可写)
+   4. `/usr/local/bin`(仅当可写,不主动 sudo)
+3. **兜底**:若以上都不满足,使用 `$HOME/.local/bin`(创建之),并检测当前 shell
+   (`$SHELL`:zsh→`~/.zshrc`;bash→Linux `~/.bashrc` / macOS `~/.bash_profile`)
+   打印一行 `export PATH="$HOME/.local/bin:$PATH"` 供用户追加。
+4. 判定「在 PATH 中」用精确分段匹配(`:$PATH:` 包含 `:$dir:`),避免子串误判。
+5. 安装结束打印最终选定的 bin 目录与该目录是否已生效于当前 PATH。
 
 ## zsh 补全(_ccm)
 
@@ -129,6 +145,8 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="claude-haiku-4-5-20251001"
 - run 的参数解析:模型覆盖正确写入对应 env;`--` 后参数正确收集
   (用一个假的 `claude` 桩脚本打印 env 与 argv 来断言,不真正联网)。
 - `ccm env` 输出正确路径。
+- install.sh bin 目录探测:`CCM_BIN_DIR` / `--bin-dir` 覆盖生效;PATH 段匹配
+  用精确分段(`:$PATH:`)而非子串(可用注入假 PATH 的方式断言选中目录)。
 
 ## 安全
 
