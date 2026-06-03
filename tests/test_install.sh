@@ -11,11 +11,16 @@ TESTS_RUN=0; TESTS_FAIL=0
 out="$(CCM_BIN_DIR=/tmp/explicitbin detect_bin_dir)"
 assert_eq "显式 CCM_BIN_DIR 优先" "/tmp/explicitbin" "$out"
 
-# PATH 段精确匹配:构造一个在 PATH 且可写的临时目录
-tmpbin="$(mktemp -d)"
-out="$(PATH="$tmpbin:/usr/bin:/bin" HOME=/nonexistent_home_xyz detect_bin_dir)"
-assert_eq "选中 PATH 中可写目录" "$tmpbin" "$out"
-rm -rf "$tmpbin"
+# 候选目录在 PATH 且可写时被选中(~/.local/bin 优先)
+tmphome="$(mktemp -d)"
+mkdir -p "$tmphome/.local/bin"
+out="$(HOME="$tmphome" PATH="$tmphome/.local/bin:/usr/bin:/bin" detect_bin_dir)"
+assert_eq "选中候选 ~/.local/bin(在PATH且可写)" "$tmphome/.local/bin" "$out"
+
+# 候选都不在 PATH 时兜底 ~/.local/bin
+out="$(HOME="$tmphome" PATH="/usr/bin:/bin" detect_bin_dir)"
+assert_eq "兜底 ~/.local/bin" "$tmphome/.local/bin" "$out"
+rm -rf "$tmphome"
 
 # 显式覆盖即使非 PATH 也返回该值
 out="$(CCM_BIN_DIR=/usr/lo detect_bin_dir)"

@@ -16,18 +16,10 @@ detect_bin_dir() {
   local brewbin=""
   if command -v brew >/dev/null 2>&1; then brewbin="$(brew --prefix)/bin"; fi
   local c
-  # 优先级候选(在 PATH 且可写)
   for c in "$HOME/.local/bin" "$HOME/bin" "$brewbin" "/usr/local/bin"; do
     [ -n "$c" ] || continue
     if _in_path "$c" && [ -w "$c" ]; then printf '%s\n' "$c"; return; fi
   done
-  # 退化:扫描 PATH 中任意可写目录
-  local oldifs="$IFS"; IFS=':'
-  for c in $PATH; do
-    [ -n "$c" ] || continue
-    if [ -w "$c" ]; then IFS="$oldifs"; printf '%s\n' "$c"; return; fi
-  done
-  IFS="$oldifs"
   printf '%s\n' "$HOME/.local/bin"
 }
 
