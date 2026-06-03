@@ -60,5 +60,23 @@ assert_contains "show 打码有星号" "***" "$out"
 out="$(run_ccm show masktest --raw)"
 assert_contains "show --raw 显示原文" "sk-5_nclDqRENf1rPMBiPp8Aw" "$out"
 
+# env 输出绝对路径
+cat >"$SANDBOX/profiles/envtest.env" <<'EOF'
+export ANTHROPIC_BASE_URL="https://gw.example.com"
+EOF
+out="$(run_ccm env envtest)"
+assert_eq "env 输出路径" "$SANDBOX/profiles/envtest.env" "$out"
+
+# rm 输入 y 删除
+printf 'y\n' | CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" bash "$CCM_BIN" rm envtest >/dev/null 2>&1
+assert_eq "rm 后文件消失" "no" "$([ -f "$SANDBOX/profiles/envtest.env" ] && echo yes || echo no)"
+
+# rm 输入 n 保留
+cat >"$SANDBOX/profiles/keep.env" <<'EOF'
+export ANTHROPIC_BASE_URL="https://gw.example.com"
+EOF
+printf 'n\n' | CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" bash "$CCM_BIN" rm keep >/dev/null 2>&1
+assert_eq "rm n 保留文件" "yes" "$([ -f "$SANDBOX/profiles/keep.env" ] && echo yes || echo no)"
+
 teardown
 finish

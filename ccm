@@ -111,6 +111,27 @@ cmd_show() {
   done <"$pf"
 }
 
+cmd_env() {
+  local name="$1"
+  [ -n "$name" ] || _die 2 "用法: ccm env <profile>"
+  local pf; pf="$(_profile_path "$name")"
+  [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
+  printf '%s\n' "$pf"
+}
+
+cmd_rm() {
+  local name="$1"
+  [ -n "$name" ] || _die 2 "用法: ccm rm <profile>"
+  local pf; pf="$(_profile_path "$name")"
+  [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
+  printf "确认删除 profile '%s'? [y/N] " "$name"
+  local ans; read -r ans
+  case "$ans" in
+    y|Y|yes|YES) rm -f "$pf"; echo "已删除 $name" ;;
+    *) echo "已取消" ;;
+  esac
+}
+
 usage() {
   cat <<'EOF'
 cc-manager (ccm) — 管理多个 Claude Code 环境
@@ -137,6 +158,8 @@ main() {
     new) cmd_new "$@" ;;
     edit) cmd_edit "$@" ;;
     show) cmd_show "$@" ;;
+    rm) cmd_rm "$@" ;;
+    env) cmd_env "$@" ;;
     *) _die 2 "未知命令: $cmd(运行 'ccm help')" ;;
   esac
 }
