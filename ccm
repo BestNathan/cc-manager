@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# cc-manager — 管理多个 Claude Code 环境
+set -o pipefail
+
+CCM_VERSION="0.1.0"
+CCM_HOME="${CCM_HOME:-$HOME/.cc-manager}"
+PROFILES_DIR="$CCM_HOME/profiles"
+TEMPLATE="$CCM_HOME/template.env"
+
+_die() { # _die <code> <msg...>
+  local code="$1"; shift
+  printf 'cc-manager: %s\n' "$*" >&2
+  exit "$code"
+}
+
+usage() {
+  cat <<'EOF'
+cc-manager (ccm) — 管理多个 Claude Code 环境
+
+用法:
+  ccm run <profile> [--opus M] [--sonnet M] [--haiku M] [--subagent M] [-- <claude args>]
+  ccm list | ls
+  ccm new <profile>
+  ccm edit <profile>
+  ccm show <profile> [--raw]
+  ccm rm <profile>
+  ccm env <profile>
+  ccm help | -h | --help
+  ccm version | --version
+EOF
+}
+
+main() {
+  local cmd="${1:-help}"; shift || true
+  case "$cmd" in
+    help|-h|--help) usage ;;
+    version|--version) echo "ccm $CCM_VERSION" ;;
+    *) _die 2 "未知命令: $cmd(运行 'ccm help')" ;;
+  esac
+}
+
+main "$@"
