@@ -127,5 +127,29 @@ assert_contains "run 不存在列出 work" "work" "$out"
 run_ccm run >/dev/null 2>&1
 assert_eq "run 缺名退出码2" "2" "$?"
 
+# 取值 flag 缺少参数 -> 退出码 2,且不能挂起
+# 用后台子进程 + kill 兜底,避免死循环卡住测试
+_timed_run() { # _timed_run <秒> <args...>; 打印退出码,超时则视为失败(码124)
+  local secs="$1"; shift
+  ( CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" EDITOR=true bash "$CCM_BIN" "$@" >/dev/null 2>&1 ) &
+  local pid=$!
+  ( sleep "$secs"; kill -9 "$pid" 2>/dev/null ) &
+  local killer=$!
+  if wait "$pid" 2>/dev/null; then echo 0; else
+    local rc=$?
+    kill -9 "$killer" 2>/dev/null
+    # 被 kill -9 的进程 wait 返回 137;否则返回真实退出码
+    if [ "$rc" -eq 137 ]; then echo 124; else echo "$rc"; fi
+  fi
+  kill -9 "$killer" 2>/dev/null; wait "$killer" 2>/dev/null
+}
+
+rc="$(_timed_run 3 run work --opus)"
+assert_eq "run --opus 缺值不挂起且退出2" "2" "$rc"
+
+# flag 值不能是另一个 flag
+run_ccm run work --sonnet --opus >/dev/null 2>&1
+assert_eq "run --sonnet 值为flag报错2" "2" "$?"
+
 teardown
 finish

@@ -146,10 +146,10 @@ cmd_run() {
   local passthrough=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --opus)     opus="$2";     shift 2 ;;
-      --sonnet)   sonnet="$2";   shift 2 ;;
-      --haiku)    haiku="$2";    shift 2 ;;
-      --subagent) subagent="$2"; shift 2 ;;
+      --opus)     [ $# -ge 2 ] && [ "${2#-}" = "$2" ] || _die 2 "$1 需要一个模型参数"; opus="$2";     shift 2 ;;
+      --sonnet)   [ $# -ge 2 ] && [ "${2#-}" = "$2" ] || _die 2 "$1 需要一个模型参数"; sonnet="$2";   shift 2 ;;
+      --haiku)    [ $# -ge 2 ] && [ "${2#-}" = "$2" ] || _die 2 "$1 需要一个模型参数"; haiku="$2";    shift 2 ;;
+      --subagent) [ $# -ge 2 ] && [ "${2#-}" = "$2" ] || _die 2 "$1 需要一个模型参数"; subagent="$2"; shift 2 ;;
       --) shift; passthrough=("$@"); break ;;
       -*) usage_run; exit 2 ;;
       *)  if [ -z "$profile" ]; then profile="$1"; shift; else _die 2 "多余参数: $1"; fi ;;
