@@ -78,5 +78,11 @@ EOF
 printf 'n\n' | CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" bash "$CCM_BIN" rm keep >/dev/null 2>&1
 assert_eq "rm n 保留文件" "yes" "$([ -f "$SANDBOX/profiles/keep.env" ] && echo yes || echo no)"
 
+# 非法 profile 名(路径穿越)应被拒绝,退出码 2
+run_ccm show '../evil' >/dev/null 2>&1
+assert_eq "拒绝路径穿越 ../" "2" "$?"
+run_ccm env 'a/b' >/dev/null 2>&1
+assert_eq "拒绝含斜杠名" "2" "$?"
+
 teardown
 finish

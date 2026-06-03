@@ -37,7 +37,12 @@ EOF
   fi
 }
 
-_profile_path() { printf '%s/%s.env' "$PROFILES_DIR" "$1"; }
+_profile_path() {
+  case "$1" in
+    ""|*/*|*..*) _die 2 "非法 profile 名: '$1'(不能为空或含 / 或 ..)" ;;
+  esac
+  printf '%s/%s.env' "$PROFILES_DIR" "$1"
+}
 
 _mask() { # _mask <secret> -> 头4***尾4(过短则全星)
   local s="$1" n=${#1}
@@ -64,7 +69,7 @@ cmd_new() {
   local name="$1"
   [ -n "$name" ] || _die 2 "用法: ccm new <profile>"
   _ensure_skeleton
-  local pf; pf="$(_profile_path "$name")"
+  local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] && _die 1 "profile '$name' 已存在(用 'ccm edit $name')"
   cp "$TEMPLATE" "$pf"
   chmod 600 "$pf"
@@ -75,7 +80,7 @@ cmd_new() {
 cmd_edit() {
   local name="$1"
   [ -n "$name" ] || _die 2 "用法: ccm edit <profile>"
-  local pf; pf="$(_profile_path "$name")"
+  local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在(用 'ccm new $name')"
   "${EDITOR:-vi}" "$pf"
 }
@@ -90,7 +95,7 @@ cmd_show() {
     esac
   done
   [ -n "$name" ] || _die 2 "用法: ccm show <profile> [--raw]"
-  local pf; pf="$(_profile_path "$name")"
+  local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
   if [ "$raw" -eq 1 ]; then
     cat "$pf"
@@ -114,7 +119,7 @@ cmd_show() {
 cmd_env() {
   local name="$1"
   [ -n "$name" ] || _die 2 "用法: ccm env <profile>"
-  local pf; pf="$(_profile_path "$name")"
+  local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
   printf '%s\n' "$pf"
 }
@@ -122,7 +127,7 @@ cmd_env() {
 cmd_rm() {
   local name="$1"
   [ -n "$name" ] || _die 2 "用法: ccm rm <profile>"
-  local pf; pf="$(_profile_path "$name")"
+  local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
   printf "确认删除 profile '%s'? [y/N] " "$name"
   local ans; read -r ans
