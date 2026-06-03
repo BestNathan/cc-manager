@@ -33,5 +33,19 @@ assert_contains "列出 work" "work" "$out"
 assert_contains "列出 base_url" "https://gw.example.com" "$out"
 assert_eq "list 不泄露 token" "no" "$(printf '%s' "$out" | grep -q 'sk-abcd' && echo yes || echo no)"
 
+# new 生成文件 + 权限 600(EDITOR=true 避免真打开编辑器)
+run_ccm new fresh >/dev/null 2>&1
+assert_eq "new 生成文件" "yes" "$([ -f "$SANDBOX/profiles/fresh.env" ] && echo yes || echo no)"
+perm="$(stat -f '%Lp' "$SANDBOX/profiles/fresh.env" 2>/dev/null || stat -c '%a' "$SANDBOX/profiles/fresh.env")"
+assert_eq "new 权限 600" "600" "$perm"
+
+# 重复 new 报错(退出码非 0)
+run_ccm new fresh >/dev/null 2>&1
+assert_eq "重复 new 退出码1" "1" "$?"
+
+# edit 不存在的 profile 报错
+run_ccm edit nope >/dev/null 2>&1
+assert_eq "edit 不存在退出码1" "1" "$?"
+
 teardown
 finish
