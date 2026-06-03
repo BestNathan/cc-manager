@@ -47,5 +47,18 @@ assert_eq "重复 new 退出码1" "1" "$?"
 run_ccm edit nope >/dev/null 2>&1
 assert_eq "edit 不存在退出码1" "1" "$?"
 
+cat >"$SANDBOX/profiles/masktest.env" <<'EOF'
+export ANTHROPIC_AUTH_TOKEN="sk-5_nclDqRENf1rPMBiPp8Aw"
+export ANTHROPIC_BASE_URL="https://gw.example.com"
+EOF
+
+out="$(run_ccm show masktest)"
+assert_eq "show 默认不露原 token" "no" "$(printf '%s' "$out" | grep -q 'sk-5_nclDqRENf1rPMBiPp8Aw' && echo yes || echo no)"
+assert_contains "show 打码保留头部" "sk-5" "$out"
+assert_contains "show 打码有星号" "***" "$out"
+
+out="$(run_ccm show masktest --raw)"
+assert_contains "show --raw 显示原文" "sk-5_nclDqRENf1rPMBiPp8Aw" "$out"
+
 teardown
 finish

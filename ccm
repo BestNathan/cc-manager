@@ -39,6 +39,11 @@ EOF
 
 _profile_path() { printf '%s/%s.env' "$PROFILES_DIR" "$1"; }
 
+_mask() { # _mask <secret> -> 头4***尾4(过短则全星)
+  local s="$1" n=${#1}
+  if [ "$n" -le 8 ]; then printf '****'; else printf '%s***%s' "${s:0:4}" "${s: -4}"; fi
+}
+
 cmd_list() {
   _ensure_skeleton
   local found=0 f name url line
@@ -75,6 +80,37 @@ cmd_edit() {
   "${EDITOR:-vi}" "$pf"
 }
 
+cmd_show() {
+  local name="" raw=0 a
+  for a in "$@"; do
+    case "$a" in
+      --raw) raw=1 ;;
+      -*) _die 2 "未知选项: $a" ;;
+      *) [ -z "$name" ] && name="$a" || _die 2 "多余参数: $a" ;;
+    esac
+  done
+  [ -n "$name" ] || _die 2 "用法: ccm show <profile> [--raw]"
+  local pf; pf="$(_profile_path "$name")"
+  [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
+  if [ "$raw" -eq 1 ]; then
+    cat "$pf"
+    return
+  fi
+  # 打码:对 ANTHROPIC_AUTH_TOKEN 的值做掩码,其余原样
+  local line val
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *ANTHROPIC_AUTH_TOKEN=*)
+        val="${line#*=}"
+        val="${val%\"}"; val="${val#\"}"
+        val="${val%\'}"; val="${val#\'}"
+        printf 'export ANTHROPIC_AUTH_TOKEN="%s"\n' "$(_mask "$val")"
+        ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done <"$pf"
+}
+
 usage() {
   cat <<'EOF'
 cc-manager (ccm) — 管理多个 Claude Code 环境
@@ -100,6 +136,7 @@ main() {
     list|ls) cmd_list ;;
     new) cmd_new "$@" ;;
     edit) cmd_edit "$@" ;;
+    show) cmd_show "$@" ;;
     *) _die 2 "未知命令: $cmd(运行 'ccm help')" ;;
   esac
 }
