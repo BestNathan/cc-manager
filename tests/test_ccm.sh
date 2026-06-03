@@ -18,5 +18,20 @@ run_ccm list >/dev/null 2>&1
 assert_eq "自动建 profiles 目录" "yes" "$([ -d "$SANDBOX/profiles" ] && echo yes || echo no)"
 assert_eq "自动建 template.env" "yes" "$([ -f "$SANDBOX/template.env" ] && echo yes || echo no)"
 
+# 空 profiles 提示
+out="$(run_ccm list)"
+assert_contains "空列表提示" "暂无 profile" "$out"
+
+# 放一个 profile 后能列出
+mkdir -p "$SANDBOX/profiles"
+cat >"$SANDBOX/profiles/work.env" <<'EOF'
+export ANTHROPIC_AUTH_TOKEN="sk-abcd1234efgh5678"
+export ANTHROPIC_BASE_URL="https://gw.example.com"
+EOF
+out="$(run_ccm list)"
+assert_contains "列出 work" "work" "$out"
+assert_contains "列出 base_url" "https://gw.example.com" "$out"
+assert_eq "list 不泄露 token" "no" "$(printf '%s' "$out" | grep -q 'sk-abcd' && echo yes || echo no)"
+
 teardown
 finish

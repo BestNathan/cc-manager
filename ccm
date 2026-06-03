@@ -39,6 +39,22 @@ EOF
 
 _profile_path() { printf '%s/%s.env' "$PROFILES_DIR" "$1"; }
 
+cmd_list() {
+  _ensure_skeleton
+  local found=0 f name url line
+  for f in "$PROFILES_DIR"/*.env; do
+    [ -e "$f" ] || continue
+    found=1
+    name="$(basename "$f" .env)"
+    line="$(grep -E '^[[:space:]]*export[[:space:]]+ANTHROPIC_BASE_URL=' "$f" | head -1)"
+    url="${line#*=}"
+    url="${url%\"}"; url="${url#\"}"
+    url="${url%\'}"; url="${url#\'}"
+    printf '%-20s %s\n' "$name" "${url:-(no base_url)}"
+  done
+  [ "$found" -eq 1 ] || echo "(暂无 profile,用 'ccm new <name>' 创建)"
+}
+
 usage() {
   cat <<'EOF'
 cc-manager (ccm) — 管理多个 Claude Code 环境
@@ -61,7 +77,7 @@ main() {
   case "$cmd" in
     help|-h|--help) usage ;;
     version|--version) echo "ccm $CCM_VERSION" ;;
-    list|ls) _ensure_skeleton ;;
+    list|ls) cmd_list ;;
     *) _die 2 "未知命令: $cmd(运行 'ccm help')" ;;
   esac
 }
