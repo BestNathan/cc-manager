@@ -84,5 +84,48 @@ assert_eq "拒绝路径穿越 ../" "2" "$?"
 run_ccm env 'a/b' >/dev/null 2>&1
 assert_eq "拒绝含斜杠名" "2" "$?"
 
+# 准备一个完整 profile
+cat >"$SANDBOX/profiles/work.env" <<'EOF'
+export ANTHROPIC_AUTH_TOKEN="sk-token-xyz"
+export ANTHROPIC_BASE_URL="https://gw.example.com"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4-8"
+export ANTHROPIC_DEFAULT_OPUS_MODEL_NAME="claude-opus-4-8"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4-6"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5-20251001"
+EOF
+
+# 基本启动:env 被注入到(假)claude
+OUT="$SANDBOX/run1.txt"
+CLAUDE_STUB_OUT="$OUT" run_ccm run work >/dev/null 2>&1
+assert_contains "run 注入 token" "TOKEN=sk-token-xyz" "$(cat "$OUT")"
+assert_contains "run 注入 base" "BASE=https://gw.example.com" "$(cat "$OUT")"
+assert_contains "run 默认 opus" "OPUS=claude-opus-4-8" "$(cat "$OUT")"
+
+# 模型覆盖:--opus 同时改 MODEL 与 MODEL_NAME
+OUT="$SANDBOX/run2.txt"
+CLAUDE_STUB_OUT="$OUT" run_ccm run work --opus claude-opus-4-7 >/dev/null 2>&1
+assert_contains "覆盖 opus model" "OPUS=claude-opus-4-7" "$(cat "$OUT")"
+assert_contains "覆盖 opus name" "OPUS_NAME=claude-opus-4-7" "$(cat "$OUT")"
+
+# --subagent 覆盖
+OUT="$SANDBOX/run3.txt"
+CLAUDE_STUB_OUT="$OUT" run_ccm run work --subagent claude-opus-4-7 >/dev/null 2>&1
+assert_contains "覆盖 subagent" "SUBAGENT=claude-opus-4-7" "$(cat "$OUT")"
+
+# -- 之后参数透传给 claude
+OUT="$SANDBOX/run4.txt"
+CLAUDE_STUB_OUT="$OUT" run_ccm run work -- --resume foo >/dev/null 2>&1
+assert_contains "透传 argv" "ARGV=--resume foo" "$(cat "$OUT")"
+
+# 不存在的 profile:退出码 1 且列出可用
+run_ccm run nope >/dev/null 2>&1
+assert_eq "run 不存在退出码1" "1" "$?"
+out="$(run_ccm run nope 2>&1)"
+assert_contains "run 不存在列出 work" "work" "$out"
+
+# 缺 profile 名:退出码 2
+run_ccm run >/dev/null 2>&1
+assert_eq "run 缺名退出码2" "2" "$?"
+
 teardown
 finish

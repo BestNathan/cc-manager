@@ -137,6 +137,52 @@ cmd_rm() {
   esac
 }
 
+usage_run() {
+  echo "用法: ccm run <profile> [--opus M] [--sonnet M] [--haiku M] [--subagent M] [-- <claude args>]" >&2
+}
+
+cmd_run() {
+  local profile="" opus="" sonnet="" haiku="" subagent=""
+  local passthrough=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --opus)     opus="$2";     shift 2 ;;
+      --sonnet)   sonnet="$2";   shift 2 ;;
+      --haiku)    haiku="$2";    shift 2 ;;
+      --subagent) subagent="$2"; shift 2 ;;
+      --) shift; passthrough=("$@"); break ;;
+      -*) usage_run; exit 2 ;;
+      *)  if [ -z "$profile" ]; then profile="$1"; shift; else _die 2 "多余参数: $1"; fi ;;
+    esac
+  done
+
+  if [ -z "$profile" ]; then usage_run; exit 2; fi
+
+  local pf; pf="$(_profile_path "$profile")" || exit $?
+  if [ ! -f "$pf" ]; then
+    echo "cc-manager: profile '$profile' 不存在,可用:" >&2
+    cmd_list >&2
+    exit 1
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  . "$pf"
+  set +a
+
+  if [ -n "$opus" ];     then export ANTHROPIC_DEFAULT_OPUS_MODEL="$opus";     export ANTHROPIC_DEFAULT_OPUS_MODEL_NAME="$opus"; fi
+  if [ -n "$sonnet" ];   then export ANTHROPIC_DEFAULT_SONNET_MODEL="$sonnet"; export ANTHROPIC_DEFAULT_SONNET_MODEL_NAME="$sonnet"; fi
+  if [ -n "$haiku" ];    then export ANTHROPIC_DEFAULT_HAIKU_MODEL="$haiku";   export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="$haiku"; fi
+  if [ -n "$subagent" ]; then export CLAUDE_CODE_SUBAGENT_MODEL="$subagent"; fi
+
+  [ -n "$ANTHROPIC_AUTH_TOKEN" ] || echo "cc-manager: 警告 — ANTHROPIC_AUTH_TOKEN 为空" >&2
+  [ -n "$ANTHROPIC_BASE_URL" ]   || echo "cc-manager: 警告 — ANTHROPIC_BASE_URL 为空" >&2
+
+  command -v claude >/dev/null 2>&1 || _die 127 "未找到 'claude' 命令(请确认已安装并在 PATH 中)"
+
+  exec claude "${passthrough[@]}"
+}
+
 usage() {
   cat <<'EOF'
 cc-manager (ccm) — 管理多个 Claude Code 环境
@@ -165,6 +211,7 @@ main() {
     show) cmd_show "$@" ;;
     rm) cmd_rm "$@" ;;
     env) cmd_env "$@" ;;
+    run) cmd_run "$@" ;;
     *) _die 2 "未知命令: $cmd(运行 'ccm help')" ;;
   esac
 }
