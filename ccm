@@ -13,6 +13,32 @@ _die() { # _die <code> <msg...>
   exit "$code"
 }
 
+_ensure_skeleton() {
+  mkdir -p "$PROFILES_DIR"
+  if [ ! -f "$TEMPLATE" ]; then
+    cat >"$TEMPLATE" <<'EOF'
+# cc-manager profile — 占位符,请替换为真实值后使用
+# 启动: ccm run <本文件名去掉 .env>
+
+export ANTHROPIC_AUTH_TOKEN="<YOUR_TOKEN_HERE>"
+export ANTHROPIC_BASE_URL="<https://your-gateway.example.com>"
+
+# 模型映射(按需修改)
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4-8"
+export ANTHROPIC_DEFAULT_OPUS_MODEL_NAME="claude-opus-4-8"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4-6"
+export ANTHROPIC_DEFAULT_SONNET_MODEL_NAME="claude-sonnet-4-6"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5-20251001"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="claude-haiku-4-5-20251001"
+
+# 可选:子代理模型
+# export CLAUDE_CODE_SUBAGENT_MODEL="<model-id>"
+EOF
+  fi
+}
+
+_profile_path() { printf '%s/%s.env' "$PROFILES_DIR" "$1"; }
+
 usage() {
   cat <<'EOF'
 cc-manager (ccm) — 管理多个 Claude Code 环境
@@ -35,6 +61,7 @@ main() {
   case "$cmd" in
     help|-h|--help) usage ;;
     version|--version) echo "ccm $CCM_VERSION" ;;
+    list|ls) _ensure_skeleton ;;
     *) _die 2 "未知命令: $cmd(运行 'ccm help')" ;;
   esac
 }

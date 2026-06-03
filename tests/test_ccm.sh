@@ -13,5 +13,10 @@ assert_eq "version 输出" "ccm 0.1.0" "$out"
 out="$(run_ccm help)"
 assert_contains "help 含 run" "ccm run <profile>" "$out"
 
+# 首次运行 list 应自动创建骨架
+run_ccm list >/dev/null 2>&1
+assert_eq "自动建 profiles 目录" "yes" "$([ -d "$SANDBOX/profiles" ] && echo yes || echo no)"
+assert_eq "自动建 template.env" "yes" "$([ -f "$SANDBOX/template.env" ] && echo yes || echo no)"
+
 teardown
 finish
