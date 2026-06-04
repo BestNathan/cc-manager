@@ -126,6 +126,7 @@ _install() {
   fi
   if [ -f "$src_dir/completions/_ccm" ]; then
     cp "$src_dir/completions/_ccm" "$CCM_HOME/completions/_ccm"
+    echo "✓ 已更新 zsh 补全: $CCM_HOME/completions/_ccm"
   fi
 
   # 2. bin 目录 + 软链
@@ -146,20 +147,17 @@ _install() {
   if [ "${SHELL##*/}" = zsh ] && command -v zsh >/dev/null 2>&1; then
     local fpath_line="fpath=($CCM_HOME/completions \$fpath)"
     local compinit_line="autoload -Uz compinit && compinit"
-    local need_write=0
     if ! grep -qF "$fpath_line" "$rc" 2>/dev/null; then
       echo "$fpath_line" >> "$rc"
-      need_write=1
+      echo "✓ 已自动写入 zsh 补全配置到 $rc"
     fi
     if ! grep -qF "compinit" "$rc" 2>/dev/null; then
       echo "$compinit_line" >> "$rc"
-      need_write=1
+      echo "✓ 已自动写入 compinit 到 $rc"
     fi
-    if [ "$need_write" -eq 1 ]; then
-      echo "✓ 已自动写入 zsh 补全配置到 $rc"
-    else
-      echo "✓ zsh 补全配置已存在,跳过"
-    fi
+    # 刷新 zsh 补全缓存,确保新补全立即生效
+    rm -f ~/.zcompdump ~/.zcompdump.r* 2>/dev/null
+    echo "✓ zsh 补全缓存已清理,下次启动 zsh 将加载最新补全"
   else
     echo "✓ 补全已放到 $CCM_HOME/completions/_ccm"
     echo "  在 $rc 追加(若未配置 fpath):"
