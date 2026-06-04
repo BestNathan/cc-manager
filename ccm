@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+# cc-manager — 管理多个 Claude Code 环境
+set -o pipefail
+
+CCM_VERSION="0.1.0"
+CCM_HOME="${CCM_HOME:-$HOME/.cc-manager}"
+PROFILES_DIR="$CCM_HOME/profiles"
+TEMPLATE="$CCM_HOME/template.env"
+
+_die() { # _die <code> <msg...>
+  local code="$1"; shift
+  printf 'cc-manager: %s\n' "$*" >&2
+  exit "$code"
+}
+
+_ensure_skeleton() {
+  mkdir -p "$PROFILES_DIR"
+  if [ ! -f "$TEMPLATE" ]; then
+    cat >"$TEMPLATE" <<'EOF'
+# cc-manager profile — 占位符,请替换为真实值后使用
+# 启动: ccm run <本文件名去掉 .env>
+
+export ANTHROPIC_AUTH_TOKEN="<YOUR_TOKEN_HERE>"
+export ANTHROPIC_BASE_URL="<https://your-gateway.example.com>"
+
+# 模型映射(按需修改)
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4-8"
+export ANTHROPIC_DEFAULT_OPUS_MODEL_NAME="claude-opus-4-8"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4-6"
+export ANTHROPIC_DEFAULT_SONNET_MODEL_NAME="claude-sonnet-4-6"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5-20251001"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="claude-haiku-4-5-20251001"
+
+# 可选:子代理模型
+# export CLAUDE_CODE_SUBAGENT_MODEL="<model-id>"
+EOF
+  fi
+}
+
+_profile_path() {
+  case "$1" in
+    ""|*/*|*..*) _die 2 "非法 profile 名: '$1'(不能为空或含 / 或 ..)" ;;
+  esac
+  printf '%s/%s.env' "$PROFILES_DIR" "$1"
+}
+
+_mask() { # _mask <secret> -> 头4***尾4(过短则全星)
+  local s="$1" n=${#1}
+  if [ "$n" -le 8 ]; then printf '****'; else printf '%s***%s' "${s:0:4}" "${s: -4}"; fi
+}
+
+cmd_list() {
+  _ensure_skeleton
+  local found=0 f name url line
+  for f in "$PROFILES_DIR"/*.env; do
+    [ -e "$f" ] || continue
+    found=1
+    name="$(basename "$f" .env)"
+    line="$(grep -E '^[[:space:]]*export[[:space:]]+ANTHROPIC_BASE_URL=' "$f" | head -1)"
+    url="${line#*=}"
+    url="${url%\"}"; url="${url#\"}"
+    url="${url%\'}"; url="${url#\'}"
+    printf '%-20s %s\n' "$name" "${url:-(no base_url)}"
+  done
+  [ "$found" -eq 1 ] || echo "(暂无 profile,用 'ccm new <name>' 创建)"
+}
+
+cmd_new() {
+  local name="$1"
+  [ -n "$name" ] || _die 2 "用法: ccm new <profile>"
+  _ensure_skeleton
+  local pf; pf="$(_profile_path "$name")" || exit $?
+  [ -f "$pf" ] && _die 1 "profile '$name' 已存在(用 'ccm edit $name')"
+  cp "$TEMPLATE" "$pf"
+  chmod 600 "$pf"
+  echo "已创建 $pf"
+  "${EDITOR:-vi}" "$pf"
+}
+
+cmd_edit() {
+  local name="$1"
+  [ -n "$name" ] || _die 2 "用法: ccm edit <profile>"
+  local pf; pf="$(_profile_path "$name")" || exit $?
+  [ -f "$pf" ] || _die 1 "profile '$name' 不存在(用 'ccm new $name')"
+  "${EDITOR:-vi}" "$pf"
+}
+
+cmd_show() {
+  local name="" raw=0 a
+  for a in "$@"; do
+    case "$a" in
+      --raw) raw=1 ;;
+      -*) _die 2 "未知选项: $a" ;;
+      *) [ -z "$name" ] && name="$a" || _die 2 "多余参数: $a" ;;
+    esac
+  done
+  [ -n "$name" ] || _die 2 "用法: ccm show <profile> [--raw]"
+  local pf; pf="$(_profile_path "$name")" || exit $?
+  [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
+  if [ "$raw" -eq 1 ]; then
+    cat "$pf"
+    return
+  fi
+  # 打码:对 ANTHROPIC_AUTH_TOKEN 的值做掩码,其余原样
+  local line val
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *ANTHROPIC_AUTH_TOKEN=*)
+        val="${line#*=}"
+        val="${val%\"}"; val="${val#\"}"
+        val="${val%\'}"; val="${val#\'}"
+        printf 'export ANTHROPIC_AUTH_TOKEN="%s"\n' "$(_mask "$val")"
+        ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done <"$pf"
+}
+
+cmd_env() {
+  local name="$1"
+  [ -n "$name" ] || _die 2 "用法: ccm env <profile>"
+  local pf; pf="$(_profile_path "$name")" || exit $?
+  [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
+  printf '%s\n' "$pf"
+}
+
+cmd_rm() {
+  local name="$1"
+  [ -n "$name" ] || _die 2 "用法: ccm rm <profile>"
+  local pf; pf="$(_profile_path "$name")" || exit $?
+  [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
+  printf "确认删除 profile '%s'? [y/N] " "$name"
+  local ans; read -r ans
+  case "$ans" in
+    y|Y|yes|YES) rm -f "$pf"; echo "已删除 $name" ;;
+    *) echo "已取消" ;;
+  esac
+}
+
+usage_run() {
+  echo "用法: ccm run <profile> [--opus M] [--sonnet M] [--haiku M] [--subagent M] [-- <claude args>]" >&2
+}
+
+cmd_run() {
+  local profile="" opus="" sonnet="" haiku="" subagent=""
+  local passthrough=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --opus)     [ $# -ge 2 ] && [ "${2#-}" = "$2" ] || _die 2 "$1 需要一个模型参数"; opus="$2";     shift 2 ;;
+      --sonnet)   [ $# -ge 2 ] && [ "${2#-}" = "$2" ] || _die 2 "$1 需要一个模型参数"; sonnet="$2";   shift 2 ;;
+      --haiku)    [ $# -ge 2 ] && [ "${2#-}" = "$2" ] || _die 2 "$1 需要一个模型参数"; haiku="$2";    shift 2 ;;
+      --subagent) [ $# -ge 2 ] && [ "${2#-}" = "$2" ] || _die 2 "$1 需要一个模型参数"; subagent="$2"; shift 2 ;;
+      --) shift; passthrough=("$@"); break ;;
+      -*) usage_run; exit 2 ;;
+      *)  if [ -z "$profile" ]; then profile="$1"; shift; else _die 2 "多余参数: $1"; fi ;;
+    esac
+  done
+
+  if [ -z "$profile" ]; then usage_run; exit 2; fi
+
+  local pf; pf="$(_profile_path "$profile")" || exit $?
+  if [ ! -f "$pf" ]; then
+    echo "cc-manager: profile '$profile' 不存在,可用:" >&2
+    cmd_list >&2
+    exit 1
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  . "$pf"
+  set +a
+
+  if [ -n "$opus" ];     then export ANTHROPIC_DEFAULT_OPUS_MODEL="$opus";     export ANTHROPIC_DEFAULT_OPUS_MODEL_NAME="$opus"; fi
+  if [ -n "$sonnet" ];   then export ANTHROPIC_DEFAULT_SONNET_MODEL="$sonnet"; export ANTHROPIC_DEFAULT_SONNET_MODEL_NAME="$sonnet"; fi
+  if [ -n "$haiku" ];    then export ANTHROPIC_DEFAULT_HAIKU_MODEL="$haiku";   export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="$haiku"; fi
+  if [ -n "$subagent" ]; then export CLAUDE_CODE_SUBAGENT_MODEL="$subagent"; fi
+
+  [ -n "$ANTHROPIC_AUTH_TOKEN" ] || echo "cc-manager: 警告 — ANTHROPIC_AUTH_TOKEN 为空" >&2
+  [ -n "$ANTHROPIC_BASE_URL" ]   || echo "cc-manager: 警告 — ANTHROPIC_BASE_URL 为空" >&2
+
+  command -v claude >/dev/null 2>&1 || _die 127 "未找到 'claude' 命令(请确认已安装并在 PATH 中)"
+
+  exec claude "${passthrough[@]}"
+}
+
+usage() {
+  cat <<'EOF'
+cc-manager (ccm) — 管理多个 Claude Code 环境
+
+用法:
+  ccm run <profile> [--opus M] [--sonnet M] [--haiku M] [--subagent M] [-- <claude args>]
+  ccm list | ls
+  ccm new <profile>
+  ccm edit <profile>
+  ccm show <profile> [--raw]
+  ccm rm <profile>
+  ccm env <profile>
+  ccm help | -h | --help
+  ccm version | --version
+EOF
+}
+
+main() {
+  local cmd="${1:-help}"; shift || true
+  case "$cmd" in
+    help|-h|--help) usage ;;
+    version|--version) echo "ccm $CCM_VERSION" ;;
+    list|ls) cmd_list ;;
+    new) cmd_new "$@" ;;
+    edit) cmd_edit "$@" ;;
+    show) cmd_show "$@" ;;
+    rm) cmd_rm "$@" ;;
+    env) cmd_env "$@" ;;
+    run) cmd_run "$@" ;;
+    *) _die 2 "未知命令: $cmd(运行 'ccm help')" ;;
+  esac
+}
+
+main "$@"

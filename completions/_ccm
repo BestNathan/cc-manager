@@ -1,0 +1,38 @@
+#compdef ccm
+# cc-manager zsh 补全
+
+_ccm_profiles() {
+  local dir="${CCM_HOME:-$HOME/.cc-manager}/profiles"
+  local -a names
+  names=()
+  local f
+  for f in "$dir"/*.env(N); do
+    names+=("${${f:t}:r}")
+  done
+  compadd -- $names
+}
+
+_ccm() {
+  local -a subcmds
+  subcmds=(run list ls new edit show rm env help version)
+  if (( CURRENT == 2 )); then
+    compadd -- $subcmds
+    return
+  fi
+  local cmd="${words[2]}"
+  case "$cmd" in
+    run)
+      # profile 名 + 模型 flag
+      if [[ "${words[CURRENT]}" == --* ]]; then
+        compadd -- --opus --sonnet --haiku --subagent --
+      else
+        _ccm_profiles
+      fi
+      ;;
+    edit|show|rm|env)
+      _ccm_profiles
+      ;;
+  esac
+}
+
+_ccm "$@"
