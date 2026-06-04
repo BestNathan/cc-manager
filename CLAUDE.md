@@ -61,7 +61,7 @@ Self-contained Bash script with no external dependencies (beyond `bash`). Struct
    - `_profile_path <name>` — resolves `~/.cc-manager/profiles/<name>.env`
    - `_check_settings_anthropic` — scans `.claude/settings.json` and `~/.claude/settings.json` for `env.ANTHROPIC_*` conflicts (uses `jq` if available, falls back to `grep`)
    - `_mask` — redacts secrets for display
-3. **Subcommands** (`cmd_*`): `list`, `new`, `edit`, `show`, `env`, `rm`, `backup`, `run`
+3. **Subcommands** (`cmd_*`): `list`, `new`, `edit`, `show`, `env`, `rm`, `backup-list`, `backup-restore`, `run`
 4. **`main`** (bottom): dispatches on `$1` (default: `help`)
 
 ### `ccm run` flow

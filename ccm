@@ -803,7 +803,7 @@ cmd_edit() {
     printf '%s %s\n' "$(_cc_g '✓')" "已更新 $(_cc_c "$pf")"
     # Show backup hint if backups exist
     if [ -f "${pf}.back.1" ]; then
-      printf '  %s 使用 %s 查看备份记录\n' "$(_cc_d '💡')" "$(_cc_c "ccm backup $name")"
+      printf '  %s 使用 %s 查看备份记录\n' "$(_cc_d '💡')" "$(_cc_c "ccm backup-list $name")"
     fi
   else
     printf '%s 已取消，未保存更改\n' "$(_cc_r '✖')" >&2
@@ -939,66 +939,52 @@ cmd_rm() {
   esac
 }
 
-cmd_backup() {
-  local name="" action="" a
+cmd_backup_list() {
+  local name="$1"
+  [ -n "$name" ] || _die 2 "用法: ccm backup-list <profile>"
+  local pf; pf="$(_profile_path "$name")" || exit $?
+  [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
 
-  # Parse: first non-flag arg is profile name; second (if "restore") is action
-  for a in "$@"; do
-    case "$a" in
-      restore) action="restore" ;;
-      *)
-        if [ -z "$name" ]; then
-          name="$a"
-        fi
-        ;;
-    esac
-  done
+  printf '\n  %s\n' "$(_cc_bc "━━━ profile: $name 的备份 ━━━")"
+  printf '\n'
 
-  [ -n "$name" ] || _die 2 "用法: ccm backup <profile>"
+  if _list_backups "$pf" "$name"; then
+    printf '\n'
+    printf '  %s\n' "$(_cc_d '💡 回滚: ccm backup-restore '"$name"' <序号>')"
+    printf '\n'
+  else
+    printf '  %s\n' "$(_cc_d '(暂无备份)')"
+    printf '\n'
+  fi
+}
+
+cmd_backup_restore() {
+  local name="$1" n="$2"
+  [ -n "$name" ] || _die 2 "用法: ccm backup-restore <profile> <N>"
+  [ -n "$n" ] || _die 2 "用法: ccm backup-restore <profile> <N>"
+
+  # Validate N is a number
+  case "$n" in
+    ''|*[!0-9]*) _die 2 "备份序号必须是数字: '$n'" ;;
+  esac
+  [ "$n" -ge 1 ] && [ "$n" -le "$_BACKUP_MAX" ] || _die 2 "备份序号必须在 1~${_BACKUP_MAX} 之间"
 
   local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
 
-  if [ "$action" = "restore" ]; then
-    local n=""
-    for a in "$@"; do
-      case "$a" in restore|"$name") continue ;; *) n="$a"; break ;; esac
-    done
-    [ -n "$n" ] || _die 2 "用法: ccm backup restore <profile> <N>"
+  # Confirm before restoring
+  printf '%s 确认回滚 profile %s 到 back.%s? [y/N] ' "$(_cc_r '⚠ ')" "$(_cc_c "$name")" "$n"
+  local ans; read -r ans
+  case "$ans" in
+    y|Y|yes|YES) ;;
+    *) echo "已取消"; exit 0 ;;
+  esac
 
-    # Validate N is a number
-    case "$n" in
-      ''|*[!0-9]*) _die 2 "备份序号必须是数字: '$n'" ;;
-    esac
-    [ "$n" -ge 1 ] && [ "$n" -le "$_BACKUP_MAX" ] || _die 2 "备份序号必须在 1~${_BACKUP_MAX} 之间"
+  _restore_backup "$pf" "$n"
 
-    # Confirm before restoring
-    printf '%s 确认回滚 profile %s 到 back.%s? [y/N] ' "$(_cc_r '⚠ ')" "$(_cc_c "$name")" "$n"
-    local ans; read -r ans
-    case "$ans" in
-      y|Y|yes|YES) ;;
-      *) echo "已取消"; exit 0 ;;
-    esac
-
-    _restore_backup "$pf" "$n"
-
-    printf '%s 已回滚 %s 到 back.%s\n' "$(_cc_g '✓')" "$(_cc_c "$pf")" "$n"
-    printf '  %s 当前版本已保存为 back.1\n' "$(_cc_d '💡')"
-    printf '  %s 使用 %s 查看备份记录\n' "$(_cc_d '💡')" "$(_cc_c "ccm backup $name")"
-  else
-    # list (default)
-    printf '\n  %s\n' "$(_cc_bc "━━━ profile: $name 的备份 ━━━")"
-    printf '\n'
-
-    if _list_backups "$pf" "$name"; then
-      printf '\n'
-      printf '  %s\n' "$(_cc_d '💡 回滚: ccm backup restore '"$name"' <序号>')"
-      printf '\n'
-    else
-      printf '  %s\n' "$(_cc_d '(暂无备份)')"
-      printf '\n'
-    fi
-  fi
+  printf '%s 已回滚 %s 到 back.%s\n' "$(_cc_g '✓')" "$(_cc_c "$pf")" "$n"
+  printf '  %s 当前版本已保存为 back.1\n' "$(_cc_d '💡')"
+  printf '  %s 使用 %s 查看备份记录\n' "$(_cc_d '💡')" "$(_cc_c "ccm backup-list $name")"
 }
 
 usage_run() {
@@ -1084,8 +1070,8 @@ cc-manager (ccm) — 管理多个 Claude Code 环境
   ccm edit <profile>
   ccm show <profile> [--raw]
   ccm rm <profile>
-  ccm backup <profile>             # 查看备份
-  ccm backup restore <profile> <N> # 回滚到指定备份
+  ccm backup-list <profile>            # 查看备份
+  ccm backup-restore <profile> <N>     # 回滚到指定备份
   ccm env <profile>
   ccm envref [关键词...]
   ccm help | -h | --help
@@ -1103,7 +1089,8 @@ main() {
     edit) cmd_edit "$@" ;;
     show) cmd_show "$@" ;;
     rm) cmd_rm "$@" ;;
-    backup) cmd_backup "$@" ;;
+    backup-list) cmd_backup_list "$@" ;;
+    backup-restore) cmd_backup_restore "$@" ;;
     env) cmd_env "$@" ;;
     envref) cmd_envref "$@" ;;
     run) cmd_run "$@" ;;
