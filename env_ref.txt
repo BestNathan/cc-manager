@@ -1,0 +1,252 @@
+# Claude Code Environment Variables Reference
+# Format: KEY|CATEGORY|DESCRIPTION
+# Categories: auth, model, routing, timeout, tui, mcp, security, telemetry, debug, cloud, other
+# Lines starting with # are comments
+ANTHROPIC_API_KEY|auth|API key sent as X-Api-Key header; overrides subscription
+ANTHROPIC_AUTH_TOKEN|auth|Custom Authorization header value (prefixed with Bearer)
+ANTHROPIC_AWS_API_KEY|auth|Workspace API key for Claude Platform on AWS
+ANTHROPIC_AWS_BASE_URL|auth|Override Claude Platform on AWS endpoint URL
+ANTHROPIC_AWS_WORKSPACE_ID|auth|Required for Claude Platform on AWS; sent as anthropic-workspace-id header
+ANTHROPIC_BEDROCK_BASE_URL|auth|Override Bedrock endpoint URL
+ANTHROPIC_BEDROCK_MANTLE_BASE_URL|auth|Override Bedrock Mantle endpoint URL
+ANTHROPIC_BEDROCK_SERVICE_TIER|auth|Bedrock service tier: default, flex, or priority
+ANTHROPIC_BASE_URL|routing|Override API endpoint for proxy/gateway routing
+ANTHROPIC_BETAS|routing|Comma-separated anthropic-beta header values
+ANTHROPIC_CUSTOM_HEADERS|routing|Custom request headers (Name: Value format, newline-separated)
+ANTHROPIC_FOUNDRY_API_KEY|auth|API key for Microsoft Foundry authentication
+ANTHROPIC_FOUNDRY_BASE_URL|auth|Full base URL for Foundry resource
+ANTHROPIC_FOUNDRY_RESOURCE|auth|Foundry resource name
+ANTHROPIC_MODEL|model|Model name to use (overrides settings model field)
+ANTHROPIC_SMALL_FAST_MODEL|model|[DEPRECATED] Haiku-class model for background tasks
+ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION|model|Override AWS region for Haiku-class model on Bedrock
+ANTHROPIC_VERTEX_BASE_URL|auth|Override Vertex AI endpoint URL
+ANTHROPIC_VERTEX_PROJECT_ID|auth|GCP project ID for Vertex AI requests
+ANTHROPIC_WORKSPACE_ID|auth|Workspace ID for workload identity federation
+ANTHROPIC_DEFAULT_OPUS_MODEL|model|Opus-class model ID
+ANTHROPIC_DEFAULT_OPUS_MODEL_NAME|model|Opus-class display name in model picker
+ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION|model|Opus-class description in model picker
+ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES|model|Opus-class supported capabilities
+ANTHROPIC_DEFAULT_SONNET_MODEL|model|Sonnet-class model ID
+ANTHROPIC_DEFAULT_SONNET_MODEL_NAME|model|Sonnet-class display name in model picker
+ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION|model|Sonnet-class description in model picker
+ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES|model|Sonnet-class supported capabilities
+ANTHROPIC_DEFAULT_HAIKU_MODEL|model|Haiku-class model ID
+ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME|model|Haiku-class display name in model picker
+ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION|model|Haiku-class description in model picker
+ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES|model|Haiku-class supported capabilities
+ANTHROPIC_CUSTOM_MODEL_OPTION|model|Custom model ID to add to /model picker
+ANTHROPIC_CUSTOM_MODEL_OPTION_NAME|model|Display name for custom model entry
+ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION|model|Description for custom model entry
+ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES|model|Capabilities for custom model entry
+AWS_BEARER_TOKEN_BEDROCK|auth|Bedrock API key for authentication
+CLAUDE_CODE_USE_BEDROCK|routing|Use Amazon Bedrock as provider
+CLAUDE_CODE_USE_MANTLE|routing|Use Bedrock Mantle endpoint
+CLAUDE_CODE_USE_VERTEX|routing|Use Google Vertex AI as provider
+CLAUDE_CODE_USE_FOUNDRY|routing|Use Microsoft Foundry as provider
+CLAUDE_CODE_USE_ANTHROPIC_AWS|routing|Use Claude Platform on AWS
+CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST|routing|Set by host platforms managing provider routing
+CLAUDE_CODE_PROXY_RESOLVES_HOSTS|routing|Allow proxy to perform DNS resolution
+CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH|auth|Skip client-side auth for Claude Platform on AWS
+CLAUDE_CODE_SKIP_BEDROCK_AUTH|auth|Skip AWS auth for Bedrock (LLM gateway)
+CLAUDE_CODE_SKIP_FOUNDRY_AUTH|auth|Skip Azure auth for Foundry (LLM gateway)
+CLAUDE_CODE_SKIP_MANTLE_AUTH|auth|Skip AWS auth for Mantle (LLM gateway)
+CLAUDE_CODE_SKIP_VERTEX_AUTH|auth|Skip Google auth for Vertex (LLM gateway)
+CLAUDE_CODE_CERT_STORE|other|CA certificate sources: bundled, system (default: bundled,system)
+CLAUDE_CODE_CLIENT_CERT|other|Path to client certificate for mTLS
+CLAUDE_CODE_CLIENT_KEY|other|Path to client private key for mTLS
+CLAUDE_CODE_CLIENT_KEY_PASSPHRASE|other|Passphrase for encrypted client key
+API_TIMEOUT_MS|timeout|API request timeout in ms (default 600000)
+BASH_DEFAULT_TIMEOUT_MS|timeout|Default timeout for bash commands (default 120000)
+BASH_MAX_TIMEOUT_MS|timeout|Maximum timeout model can set (default 600000)
+BASH_MAX_OUTPUT_LENGTH|timeout|Max chars in bash output before truncation to file
+CLAUDE_STREAM_IDLE_TIMEOUT_MS|timeout|Streaming idle watchdog timeout (default 300000)
+MCP_TIMEOUT|timeout|MCP server startup timeout (default 30000)
+MCP_CONNECT_TIMEOUT_MS|timeout|Blocking MCP startup connection wait (default 5000)
+MCP_CONNECTION_NONBLOCKING|timeout|Wait for MCP servers before first query (default non-blocking)
+MCP_TOOL_TIMEOUT|timeout|MCP tool execution timeout (default 100000000)
+CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS|timeout|Stall timeout for background subagents (default 600000)
+CLAUDE_CODE_NO_FLICKER|tui|Enable fullscreen rendering to reduce flicker
+CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN|tui|Disable fullscreen; keep conversation in native scrollback
+CLAUDE_CODE_DISABLE_MOUSE|tui|Disable mouse tracking in fullscreen
+CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL|tui|Disable virtual scrolling in fullscreen
+CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT|tui|Repaint entire screen every frame in fullscreen
+CLAUDE_CODE_ACCESSIBILITY|tui|Keep native terminal cursor visible for screen magnifiers
+CLAUDE_CODE_NATIVE_CURSOR|tui|Show terminal's own cursor at input caret
+CLAUDE_CODE_SCROLL_SPEED|tui|Mouse wheel scroll multiplier (1-20, default matches vim at 3)
+CLAUDE_CODE_SYNTAX_HIGHLIGHT|tui|Set false to disable syntax highlighting in diffs
+CLAUDE_CODE_DISABLE_TERMINAL_TITLE|tui|Disable automatic terminal title updates
+CLAUDE_CODE_TMUX_TRUECOLOR|tui|Allow 24-bit truecolor output inside tmux
+CLAUDE_CODE_HIDE_CWD|tui|Hide working directory in startup logo
+CLAUDE_CODE_FORCE_SYNC_OUTPUT|tui|Force synchronized output (DEC mode 2026)
+CLAUDE_CODE_MAX_CONTEXT_TOKENS|model|Override context window size (only with DISABLE_COMPACT)
+CLAUDE_CODE_MAX_OUTPUT_TOKENS|model|Set max output tokens for requests
+CLAUDE_CODE_EFFORT_LEVEL|other|Set effort level: low, medium, high, xhigh, max, auto
+CLAUDE_CODE_DISABLE_THINKING|model|Force-disable extended thinking
+CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING|model|Disable adaptive reasoning on Opus/Sonnet 4.6
+CLAUDE_CODE_DISABLE_1M_CONTEXT|model|Disable 1M context window support
+MAX_THINKING_TOKENS|model|Override extended thinking token budget (0 to disable)
+CLAUDE_CODE_SUBAGENT_MODEL|model|Model for subagent spawns
+ENABLE_TOOL_SEARCH|mcp|Control MCP tool search: true, auto, auto:N, false
+ENABLE_CLAUDEAI_MCP_SERVERS|mcp|Set false to disable claude.ai MCP servers
+MAX_MCP_OUTPUT_TOKENS|mcp|Max tokens in MCP tool responses (default 25000)
+MCP_SERVER_CONNECTION_BATCH_SIZE|mcp|Max local MCP servers to connect in parallel (default 3)
+MCP_REMOTE_SERVER_CONNECTION_BATCH_SIZE|mcp|Max remote MCP servers to connect in parallel (default 20)
+MCP_OAUTH_CALLBACK_PORT|mcp|Fixed port for OAuth redirect callback
+MCP_CLIENT_SECRET|mcp|OAuth client secret for pre-configured MCP credentials
+CLAUDE_CODE_MCP_ALLOWLIST_ENV|mcp|Spawn MCP servers with safe baseline environment
+CLAUDE_CODE_SUBPROCESS_ENV_SCRUB|security|Strip credentials from subprocess environments
+CLAUDE_CODE_SCRIPT_CAPS|security|Limit script invocation count per session
+CLAUDE_CODE_PERFORCE_MODE|security|Enable Perforce-aware write protection
+CLAUDE_CODE_DISABLE_ATTACHMENTS|security|Disable attachment processing
+CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING|security|Disable file checkpointing (/rewind unavailable)
+CLAUDE_CODE_BASH_MAINTAIN_PROJECT_WORKING_DIR|security|Return to original CWD after each bash command
+DISABLE_TELEMETRY|telemetry|Opt out of telemetry and feature-flag fetching
+DO_NOT_TRACK|telemetry|Opt out of telemetry (cross-tool convention)
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC|telemetry|Disable autoupdater, feedback, error reporting, telemetry
+CLAUDE_CODE_ENABLE_TELEMETRY|telemetry|Enable OpenTelemetry data collection
+CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY|telemetry|Disable session quality surveys
+CLAUDE_CODE_ENABLE_FEEDBACK_SURVEY_FOR_OTEL|telemetry|Route feedback survey to own OTel collector
+DISABLE_ERROR_REPORTING|telemetry|Opt out of Sentry error reporting
+DISABLE_GROWTHBOOK|telemetry|Disable GrowthBook feature-flag fetching
+DISABLE_AUTOUPDATER|telemetry|Disable automatic background updates
+DISABLE_UPDATES|telemetry|Block all updates including manual
+IS_DEMO|telemetry|Demo mode: hides email/org, skips onboarding
+CLAUDE_CODE_ATTRIBUTION_HEADER|other|Set 0 to omit attribution block from system prompt
+DEBUG|debug|Enable debug mode (equivalent to --debug)
+CLAUDE_CODE_DEBUG_LOGS_DIR|debug|Override debug log file path
+CLAUDE_CODE_DEBUG_LOG_LEVEL|debug|Minimum log level: verbose, debug, info, warn, error
+CLAUDE_CODE_SIMPLE|debug|Minimal system prompt and reduced tools (like --bare)
+CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT|debug|Use shorter system prompt on any model
+CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK|debug|Disable streaming fallback on proxy errors
+OTEL_LOG_RAW_API_BODIES|debug|Emit API request/response bodies as OTel events
+OTEL_LOG_TOOL_CONTENT|debug|Include tool input/output in OTel span events
+OTEL_LOG_TOOL_DETAILS|debug|Include tool arguments and error strings in OTel
+OTEL_LOG_USER_PROMPTS|debug|Include user prompt text in OTel traces
+OTEL_METRICS_INCLUDE_ACCOUNT_UUID|debug|Set false to exclude account UUID from metrics
+OTEL_METRICS_INCLUDE_SESSION_ID|debug|Set false to exclude session ID from metrics
+CLAUDE_CONFIG_DIR|cloud|Override config directory (default: ~/.claude)
+CLAUDE_CODE_REMOTE|cloud|Set automatically in cloud sessions
+CLAUDE_CODE_REMOTE_SESSION_ID|cloud|Set automatically to cloud session ID
+CLAUDE_CODE_SESSION_ID|other|Set in subprocesses to correlate with parent session
+CLAUDEDECODE|other|Set to 1 in Claude Code spawned subprocesses
+CCR_FORCE_BUNDLE|other|Force claude --remote to bundle local repo
+CLAUDE_CODE_AUTO_COMPACT_WINDOW|other|Context capacity for auto-compaction calculations
+CLAUDE_AUTOCOMPACT_PCT_OVERRIDE|other|Percentage of context capacity to trigger auto-compaction
+CLAUDE_CODE_AUTO_CONNECT_IDE|other|Override automatic IDE connection
+CLAUDE_CODE_API_KEY_HELPER_TTL_MS|other|Credential refresh interval for apiKeyHelper
+CLAUDE_CODE_AUTO_BACKGROUND_TASKS|other|Force-enable auto-backgrounding of long tasks
+CLAUDE_CODE_DISABLE_AGENT_VIEW|other|Turn off background agents and agent view
+CLAUDE_CODE_DISABLE_AUTO_MEMORY|other|Disable auto memory creation/loading
+CLAUDE_CODE_DISABLE_BACKGROUND_TASKS|other|Disable all background task functionality
+CLAUDE_CODE_DISABLE_CLAUDE_MDS|other|Prevent loading any CLAUDE.md memory files
+CLAUDE_CODE_DISABLE_CRON|other|Disable scheduled tasks and /loop skill
+CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS|other|Strip anthropic-beta headers for proxy compatibility
+CLAUDE_CODE_DISABLE_FAST_MODE|other|Disable fast mode
+CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS|other|Remove git instructions from system prompt
+CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP|other|Prevent auto-remapping of older Opus models
+CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL|other|Skip official plugin marketplace auto-install
+CLAUDE_CODE_DISABLE_POLICY_SKILLS|other|Skip loading system-wide managed skills
+CLAUDE_CODE_DISABLE_WORKFLOWS|other|Disable workflows
+CLAUDE_CODE_ENABLE_AUTO_MODE|other|Enable auto mode on Bedrock/Vertex/Foundry
+CLAUDE_CODE_ENABLE_AWAY_SUMMARY|other|Override session recap availability
+CLAUDE_CODE_ENABLE_BACKGROUND_PLUGIN_REFRESH|other|Refresh plugin state at turn boundaries
+CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING|other|Stream tool call inputs as Claude generates them
+CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY|other|Populate /model picker from gateway /v1/models
+CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION|other|Set false to disable prompt suggestions
+CLAUDE_CODE_ENABLE_TASKS|other|Use Task tools instead of legacy TodoWrite
+CLAUDE_CODE_EXIT_AFTER_STOP_DELAY|other|Auto-exit after query loop idle (SDK mode)
+CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS|other|Enable experimental agent teams
+CLAUDE_CODE_EXTRA_BODY|other|JSON merged into every API request body
+CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS|other|Override token limit for file reads
+CLAUDE_CODE_FORK_SUBAGENT|other|Make forked subagents the default
+CLAUDE_CODE_GIT_BASH_PATH|other|Windows: path to Git bash.exe
+CLAUDE_CODE_GLOB_HIDDEN|other|Set false to exclude dotfiles from Glob tool
+CLAUDE_CODE_GLOB_NO_IGNORE|other|Set false to make Glob respect .gitignore
+CLAUDE_CODE_GLOB_TIMEOUT_SECONDS|other|Timeout for Glob file discovery (default 20)
+CLAUDE_CODE_IDE_HOST_OVERRIDE|other|Override IDE extension host address
+CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL|other|Skip auto-installation of IDE extensions
+CLAUDE_CODE_IDE_SKIP_VALID_CHECK|other|Skip IDE lockfile validation during connection
+CLAUDE_CODE_MAX_RETRIES|other|Override retry count for failed API requests (default 10)
+CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY|other|Max parallel read-only tools/subagents (default 10)
+CLAUDE_CODE_MAX_TURNS|other|Cap number of agentic turns
+CLAUDE_CODE_NEW_INIT|other|Make /init run interactive setup flow
+CLAUDE_CODE_OAUTH_REFRESH_TOKEN|other|OAuth refresh token for Claude.ai auth
+CLAUDE_CODE_OAUTH_SCOPES|other|OAuth scopes for refresh token
+CLAUDE_CODE_OAUTH_TOKEN|other|OAuth access token for Claude.ai auth
+CLAUDE_CODE_OTEL_FLUSH_TIMEOUT_MS|other|Flush pending OTel spans timeout (default 5000)
+CLAUDE_CODE_OTEL_HEADERS_HELPER_DEBOUNCE_MS|other|Refresh dynamic OTel headers interval (default 1740000)
+CLAUDE_CODE_OTEL_SHUTDOWN_TIMEOUT_MS|other|OTel exporter shutdown timeout (default 2000)
+CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE|other|Auto-upgrade via Homebrew/WinGet
+CLAUDE_CODE_PLUGIN_CACHE_DIR|other|Override plugins root directory
+CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS|other|Git operations timeout for plugins (default 120000)
+CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE|other|Keep marketplace cache on git pull failure
+CLAUDE_CODE_PLUGIN_PREFER_HTTPS|other|Clone GitHub sources over HTTPS instead of SSH
+CLAUDE_CODE_PLUGIN_SEED_DIR|other|Pre-populated plugin seed directory
+CLAUDE_CODE_POWERSHELL_RESPECT_EXECUTION_POLICY|other|Respect Windows PowerShell execution policy
+CLAUDE_CODE_PROPAGATE_TRACEPARENT|other|Propagate W3C trace context for custom proxies
+CLAUDE_CODE_RESUME_INTERRUPTED_TURN|other|Auto-resume interrupted session mid-turn
+CLAUDE_CODE_RESUME_PROMPT|other|Override continuation message for resumed sessions
+CLAUDE_CODE_SHELL|other|Override automatic shell detection
+CLAUDE_CODE_SHELL_PREFIX|other|Command prefix wrapping spawned shell commands
+CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS|other|SessionEnd hook time budget (default 1500)
+CLAUDE_CODE_SKIP_PROMPT_HISTORY|other|Skip writing prompt history and transcripts to disk
+CLAUDE_CODE_STOP_HOOK_BLOCK_CAP|other|Max consecutive Stop/SubagentStop hook blocks (default 8)
+CLAUDE_CODE_SYNC_PLUGIN_INSTALL|other|Wait for plugin install before first query (-p flag)
+CLAUDE_CODE_SYNC_PLUGIN_INSTALL_TIMEOUT_MS|other|Timeout for synchronous plugin install
+CLAUDE_CODE_SYNC_SKILLS|other|Download enabled claude.ai skills before first query
+CLAUDE_CODE_SYNC_SKILLS_WAIT_TIMEOUT_MS|other|Wait timeout for initial skills sync (default 5000)
+CLAUDE_CODE_TASK_LIST_ID|other|Share task list across sessions
+CLAUDE_CODE_TEAM_NAME|other|Agent team member name
+CLAUDE_CODE_TMPDIR|other|Override temp directory for internal temp files
+CLAUDE_CODE_USE_NATIVE_FILE_SEARCH|other|Use Node.js file APIs instead of ripgrep
+CLAUDE_CODE_USE_POWERSHELL_TOOL|other|Control PowerShell tool availability
+CLAUDE_EFFORT|other|Set automatically in subprocesses to active effort level
+CLAUDE_ENABLE_BYTE_WATCHDOG|other|Force byte-level streaming idle watchdog
+CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK|other|Enable byte watchdog on Bedrock eventstream
+CLAUDE_ENABLE_STREAM_WATCHDOG|other|Enable event-level streaming idle watchdog
+CLAUDE_ENV_FILE|other|Shell script run before each bash command for env persistence
+CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX|other|Prefix for Remote Control session names
+ENABLE_PROMPT_CACHING_1H|other|Request 1-hour prompt cache TTL instead of 5 minutes
+FALLBACK_FOR_ALL_PRIMARY_MODELS|other|Trigger fallback model after overload on any model
+FORCE_AUTOUPDATE_PLUGINS|other|Force plugin auto-updates even with DISABLE_AUTOUPDATER
+FORCE_PROMPT_CACHING_5M|other|Force 5-minute cache TTL overriding 1-hour
+HTTP_PROXY|other|HTTP proxy server for network connections
+HTTPS_PROXY|other|HTTPS proxy server for network connections
+NO_PROXY|other|Domains/IPs to bypass proxy
+MAX_STRUCTURED_OUTPUT_RETRIES|other|Retry count for JSON schema validation (default 5)
+SLASH_COMMAND_TOOL_CHAR_BUDGET|other|Character budget for skill metadata (default scales with context)
+TASK_MAX_OUTPUT_LENGTH|other|Max chars in subagent output before truncation (default 32000)
+USE_BUILTIN_RIPGREP|other|Set 0 to use system-installed rg instead of bundled
+CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD|other|Load memory files from --add-dir directories
+CLAUDE_CODE_DISABLE_PROMPT_SUGGESTION|other|Set false to disable prompt suggestions
+VERTEX_REGION_CLAUDE_3_5_HAIKU|model|Override region for Claude 3.5 Haiku on Vertex
+VERTEX_REGION_CLAUDE_3_5_SONNET|model|Override region for Claude 3.5 Sonnet on Vertex
+VERTEX_REGION_CLAUDE_3_7_SONNET|model|Override region for Claude 3.7 Sonnet on Vertex
+VERTEX_REGION_CLAUDE_4_0_OPUS|model|Override region for Claude 4.0 Opus on Vertex
+VERTEX_REGION_CLAUDE_4_0_SONNET|model|Override region for Claude 4.0 Sonnet on Vertex
+VERTEX_REGION_CLAUDE_4_1_OPUS|model|Override region for Claude 4.1 Opus on Vertex
+VERTEX_REGION_CLAUDE_4_5_OPUS|model|Override region for Claude Opus 4.5 on Vertex
+VERTEX_REGION_CLAUDE_4_5_SONNET|model|Override region for Claude Sonnet 4.5 on Vertex
+VERTEX_REGION_CLAUDE_4_6_OPUS|model|Override region for Claude Opus 4.6 on Vertex
+VERTEX_REGION_CLAUDE_4_6_SONNET|model|Override region for Claude Sonnet 4.6 on Vertex
+VERTEX_REGION_CLAUDE_4_7_OPUS|model|Override region for Claude Opus 4.7 on Vertex
+VERTEX_REGION_CLAUDE_HAIKU_4_5|model|Override region for Claude Haiku 4.5 on Vertex
+DISABLE_AUTO_COMPACT|model|Disable automatic compaction (manual /compact still available)
+DISABLE_COMPACT|model|Disable all compaction (auto and manual)
+DISABLE_COST_WARNINGS|model|Disable cost warning messages
+DISABLE_DOCTOR_COMMAND|other|Hide /doctor command
+DISABLE_EXTRA_USAGE_COMMAND|other|Hide /usage-credits command
+DISABLE_FEEDBACK_COMMAND|other|Disable /feedback command
+DISABLE_INSTALLATION_CHECKS|other|Disable installation warnings
+DISABLE_INSTALL_GITHUB_APP_COMMAND|other|Hide /install-github-app command
+DISABLE_INTERLEAVED_THINKING|other|Disable interleaved-thinking beta header
+DISABLE_LOGIN_COMMAND|other|Hide /login command
+DISABLE_LOGOUT_COMMAND|other|Hide /logout command
+DISABLE_PROMPT_CACHING|model|Disable prompt caching for all models
+DISABLE_PROMPT_CACHING_HAIKU|model|Disable prompt caching for Haiku models
+DISABLE_PROMPT_CACHING_OPUS|model|Disable prompt caching for Opus models
+DISABLE_PROMPT_CACHING_SONNET|model|Disable prompt caching for Sonnet models
+DISABLE_UPGRADE_COMMAND|other|Hide /upgrade command
+CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS|other|Disable built-in subagent types (SDK only)
+CLAUDE_AGENT_SDK_MCP_NO_PREFIX|other|Skip mcp__ prefix on SDK-created MCP tools (SDK only)
+CLAUDE_CODE_DISABLE_VIRTUAL_SCROLL|tui|Disable virtual scrolling in fullscreen rendering

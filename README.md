@@ -46,6 +46,7 @@ ccm run work -- --resume                   # -- 之后透传给 claude
 ccm edit work                # 编辑
 ccm rm work                  # 删除(确认)
 ccm env work                 # 输出 profile 路径: source "$(ccm env work)"
+ccm envref [关键词]           # 搜索环境变量参考(248 项,支持分类筛选)
 ```
 
 ## profile 文件
@@ -53,6 +54,10 @@ ccm env work                 # 输出 profile 路径: source "$(ccm env work)"
 位于 `~/.cc-manager/profiles/<name>.env`,内容为 `export KEY=VAL`。
 模型覆盖会同时设置 `ANTHROPIC_DEFAULT_<TIER>_MODEL` 与 `..._MODEL_NAME`。
 可覆盖的 tier:`--opus` / `--sonnet` / `--haiku` / `--subagent`。
+
+在 `ccm new` / `ccm edit` 填写完标准字段后,会提示是否添加**自定义环境变量**。
+系统内置 248 个 Claude Code 环境变量参考,支持关键词搜索(匹配变量名和描述)。
+也可随时用 `ccm envref [关键词]` 独立搜索。
 
 ## 配置目录
 

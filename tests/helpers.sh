@@ -28,9 +28,9 @@ STUB
 
 teardown() { rm -rf "$SANDBOX" "$STUBDIR"; }
 
-# 在隔离环境里跑 ccm:CCM_HOME=sandbox,PATH 前置桩目录
+# 在隔离环境里跑 ccm:CCM_HOME=sandbox,PATH 前置桩目录,强制用 read fallback
 run_ccm() {
-  CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" EDITOR=true bash "$CCM_BIN" "$@"
+  CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" CCM_NO_DIALOG=1 bash "$CCM_BIN" "$@"
 }
 
 assert_eq() { # assert_eq <名称> <期望> <实际>

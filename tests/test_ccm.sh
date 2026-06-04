@@ -33,14 +33,14 @@ assert_contains "列出 work" "work" "$out"
 assert_contains "列出 base_url" "https://gw.example.com" "$out"
 assert_eq "list 不泄露 token" "no" "$(printf '%s' "$out" | grep -q 'sk-abcd' && echo yes || echo no)"
 
-# new 生成文件 + 权限 600(EDITOR=true 避免真打开编辑器)
-run_ccm new fresh >/dev/null 2>&1
+# new 生成文件 + 权限 600(用 9 个空行接受默认值)
+printf '\n\n\n\n\n\n\n\n\n' | run_ccm new fresh >/dev/null 2>&1
 assert_eq "new 生成文件" "yes" "$([ -f "$SANDBOX/profiles/fresh.env" ] && echo yes || echo no)"
 perm="$(stat -f '%Lp' "$SANDBOX/profiles/fresh.env" 2>/dev/null || stat -c '%a' "$SANDBOX/profiles/fresh.env")"
 assert_eq "new 权限 600" "600" "$perm"
 
 # 重复 new 报错(退出码非 0)
-run_ccm new fresh >/dev/null 2>&1
+printf '\n\n\n\n\n\n\n\n\n' | run_ccm new fresh >/dev/null 2>&1
 assert_eq "重复 new 退出码1" "1" "$?"
 
 # edit 不存在的 profile 报错
@@ -131,7 +131,7 @@ assert_eq "run 缺名退出码2" "2" "$?"
 # 用后台子进程 + kill 兜底,避免死循环卡住测试
 _timed_run() { # _timed_run <秒> <args...>; 打印退出码,超时则视为失败(码124)
   local secs="$1"; shift
-  ( CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" EDITOR=true bash "$CCM_BIN" "$@" >/dev/null 2>&1 ) &
+  ( CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" CCM_NO_DIALOG=1 bash "$CCM_BIN" "$@" >/dev/null 2>&1 ) &
   local pid=$!
   ( sleep "$secs"; kill -9 "$pid" 2>/dev/null ) &
   local killer=$!

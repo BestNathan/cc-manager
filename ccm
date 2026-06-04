@@ -7,6 +7,46 @@ CCM_HOME="${CCM_HOME:-$HOME/.cc-manager}"
 PROFILES_DIR="$CCM_HOME/profiles"
 TEMPLATE="$CCM_HOME/template.env"
 
+# ─── Color: tput (portable), auto-detect terminal ────────────────────
+_cc_on=0
+if [ -t 2 ] 2>/dev/null; then
+  # Try tput; fall back to raw ANSI if tput unavailable
+  if command -v tput >/dev/null 2>&1 && tput sgr0 >/dev/null 2>&1; then
+    _cc_on=1
+    _cc_BOLD="$(tput bold)"
+    _cc_CYAN="$(tput setaf 6)"
+    _cc_GREEN="$(tput setaf 2)"
+    _cc_YELLOW="$(tput setaf 3)"
+    _cc_RED="$(tput setaf 1)"
+    _cc_DIM="$(tput setaf 8)"
+    _cc_RESET="$(tput sgr0)"
+  else
+    _cc_on=1
+    _cc_BOLD=$'\033[1m'; _cc_CYAN=$'\033[36m'; _cc_GREEN=$'\033[32m'
+    _cc_YELLOW=$'\033[33m'; _cc_RED=$'\033[31m'; _cc_DIM=$'\033[2m'
+    _cc_RESET=$'\033[0m'
+  fi
+fi
+
+_cc() { # _cc <var_name> <text...>  → wraps text in color var
+  local vname="$1"; shift
+  if [ "$_cc_on" -eq 1 ]; then
+    printf '%s%s%s' "${!vname}" "$*" "$_cc_RESET"
+  else
+    printf '%s' "$*"
+  fi
+}
+# Compatibility wrappers — old _cc_X() names → new _cc() + tput var
+_cc_b()  { _cc _cc_BOLD  "$@"; }
+_cc_c()  { _cc _cc_CYAN   "$@"; }
+_cc_g()  { _cc _cc_GREEN  "$@"; }
+_cc_y()  { _cc _cc_YELLOW "$@"; }
+_cc_r()  { _cc _cc_RED    "$@"; }
+_cc_d()  { _cc _cc_DIM    "$@"; }
+_cc_bg() { _cc _cc_BOLD  "$@"; }
+_cc_br() { _cc _cc_RED   "$@"; }
+_cc_bc() { _cc _cc_BOLD  "$@"; }
+
 _die() { # _die <code> <msg...>
   local code="$1"; shift
   printf 'cc-manager: %s\n' "$*" >&2
@@ -75,6 +115,576 @@ _mask() { # _mask <secret> -> 头4***尾4(过短则全星)
   if [ "$n" -le 8 ]; then printf '****'; else printf '%s***%s' "${s:0:4}" "${s: -4}"; fi
 }
 
+# ─── Profile UI helpers ─────────────────────────────────────
+
+_parse_env_value() { # _parse_env_value <file> <VAR_NAME> -> stdout value
+  local file="$1" var="$2"
+  local line
+  line="$(sed -n "s/^[[:space:]]*export[[:space:]]*${var}=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p" "$file" 2>/dev/null | head -1)"
+  printf '%s' "$line"
+}
+
+_mask_preview() { # _mask_preview <value> -> short preview for display
+  local s="$1" n=${#1}
+  if [ "$n" -eq 0 ]; then printf '(空)'
+  elif [ "$n" -le 40 ]; then printf '%s' "$s"
+  else printf '%s…(%d chars)' "${s:0:16}" "$n"
+  fi
+}
+
+_has_dialog() {
+  # If CCM_NO_DIALOG is set, force fallback to read prompts
+  [ -z "${CCM_NO_DIALOG:-}" ] && command -v dialog >/dev/null 2>&1
+}
+
+_write_profile() { # _write_profile <file> <tok> <url> <opus> <opus_n> <sonnet> <sonnet_n> <haiku> <haiku_n> <subagent>
+  local file="$1" tok="$2" url="$3"
+  local opus="$4" opus_n="$5" sonnet="$6" sonnet_n="$7"
+  local haiku="$8" haiku_n="$9" subagent="${10}"
+
+  # Helper: quote a value for safe sourcing. Uses single quotes, escaping embedded single quotes.
+  _qval() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+
+  {
+    printf '# cc-manager profile\n'
+    printf 'export ANTHROPIC_AUTH_TOKEN=%s\n' "$(_qval "$tok")"
+    printf 'export ANTHROPIC_BASE_URL=%s\n' "$(_qval "$url")"
+    printf '\n# 模型映射(按需修改)\n'
+    printf 'export ANTHROPIC_DEFAULT_OPUS_MODEL=%s\n' "$(_qval "$opus")"
+    printf 'export ANTHROPIC_DEFAULT_OPUS_MODEL_NAME=%s\n' "$(_qval "$opus_n")"
+    printf 'export ANTHROPIC_DEFAULT_SONNET_MODEL=%s\n' "$(_qval "$sonnet")"
+    printf 'export ANTHROPIC_DEFAULT_SONNET_MODEL_NAME=%s\n' "$(_qval "$sonnet_n")"
+    printf 'export ANTHROPIC_DEFAULT_HAIKU_MODEL=%s\n' "$(_qval "$haiku")"
+    printf 'export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME=%s\n' "$(_qval "$haiku_n")"
+    printf '\n# 可选:子代理模型\n'
+    if [ -n "$subagent" ]; then
+      printf 'export CLAUDE_CODE_SUBAGENT_MODEL=%s\n' "$(_qval "$subagent")"
+    else
+      printf '# export CLAUDE_CODE_SUBAGENT_MODEL="<model-id>"\n'
+    fi
+
+    # Append custom environment variables if any
+    if [ "${#_CUSTOM_KEYS[@]}" -gt 0 ]; then
+      printf '\n# 自定义环境变量\n'
+      local i
+      for i in "${!_CUSTOM_KEYS[@]}"; do
+        printf 'export %s=%s\n' "${_CUSTOM_KEYS[$i]}" "$(_qval "${_CUSTOM_VALS[$i]}")"
+      done
+    fi
+  } > "$file"
+  chmod 600 "$file"
+}
+
+_ui_dialog_form() { # _ui_dialog_form <title> label1 val1 label2 val2 ... -> values on stdout (one per line), exit 0=OK
+  local title="$1"; shift
+  local term_w
+  term_w="$(tput cols 2>/dev/null || echo 80)"
+  [ "$term_w" -lt 60 ] && term_w=60
+  [ "$term_w" -gt 90 ] && term_w=90
+
+  local field_w=$(( term_w - 42 ))
+  [ "$field_w" -lt 20 ] && field_w=20
+
+  local tmpfile
+  tmpfile="$(mktemp)" || return 1
+  trap 'rm -f "$tmpfile"' RETURN
+
+  local -a args=()
+  local row=0
+  while [ $# -ge 2 ]; do
+    local label="$1" initial="$2"; shift 2
+    args+=("$label" "$row" 42 "$initial" "$row" 44 "$field_w" 0)
+    row=$((row + 1))
+  done
+
+  dialog --title "$title" \
+         --insecure \
+         --form "" \
+         $(( row + 6 )) "$term_w" 6 \
+         "${args[@]}" \
+         2>"$tmpfile"
+
+  local rc=$?
+  [ $rc -eq 0 ] || return $rc
+  cat "$tmpfile"
+}
+
+_ui_read_form() { # _ui_read_form <title> label1 val1 label2 val2 ... -> values on stdout (one per line)
+  local title="$1"; shift
+
+  printf '\n' >&2
+  printf '  %s\n' "$(_cc_bc "━ $title ━")" >&2
+  printf '\n' >&2
+
+  local -a values=()
+  while [ $# -ge 2 ]; do
+    local label="$1" initial="$2"; shift 2
+    local prompt
+    if [ -n "$initial" ]; then
+      printf '  %s %s  %s\n' "$(_cc_g '●')" "$(_cc_c "$label")" "$(_cc_y "$(_mask_preview "$initial")")" >&2
+    else
+      printf '  %s %s\n' "$(_cc_d '○')" "$(_cc_d "$label")" >&2
+    fi
+    local answer
+    printf '     ' >&2
+    read -r answer || break
+    # If empty and there was an initial value, keep the initial
+    if [ -z "$answer" ] && [ -n "$initial" ]; then
+      answer="$initial"
+    fi
+    values+=("$answer")
+  done
+
+  # Output values one per line (to stdout, for parsing)
+  local v
+  for v in "${values[@]}"; do
+    printf '%s\n' "$v"
+  done
+}
+
+_interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [existing_file]
+  local mode="$1" name="$2" existing_file="${3:-}"
+
+  # Determine initial values
+  local tok url opus opus_n sonnet sonnet_n haiku haiku_n subagent
+
+  if [ -n "$existing_file" ] && [ -f "$existing_file" ]; then
+    tok="$(_parse_env_value "$existing_file" ANTHROPIC_AUTH_TOKEN)"
+    url="$(_parse_env_value "$existing_file" ANTHROPIC_BASE_URL)"
+    opus="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_OPUS_MODEL)"
+    opus_n="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_OPUS_MODEL_NAME)"
+    sonnet="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_SONNET_MODEL)"
+    sonnet_n="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_SONNET_MODEL_NAME)"
+    haiku="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_HAIKU_MODEL)"
+    haiku_n="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME)"
+    subagent="$(_parse_env_value "$existing_file" CLAUDE_CODE_SUBAGENT_MODEL)"
+  else
+    tok="<YOUR_TOKEN_HERE>"
+    url="<https://your-gateway.example.com>"
+    opus="claude-opus-4-8"
+    opus_n="claude-opus-4-8"
+    sonnet="claude-sonnet-4-6"
+    sonnet_n="claude-sonnet-4-6"
+    haiku="claude-haiku-4-5-20251001"
+    haiku_n="claude-haiku-4-5-20251001"
+    subagent=""
+  fi
+
+  local title
+  if [ "$mode" = "new" ]; then
+    title="新建 profile: $name"
+  else
+    title="编辑 profile: $name"
+  fi
+
+  local result rc
+  if _has_dialog; then
+    result="$(_ui_dialog_form "$title" \
+      "Anthropic Auth Token:"   "$tok" \
+      "Base URL:"               "$url" \
+      "Opus Model:"             "$opus" \
+      "Opus Model Name:"       "$opus_n" \
+      "Sonnet Model:"           "$sonnet" \
+      "Sonnet Model Name:"     "$sonnet_n" \
+      "Haiku Model:"            "$haiku" \
+      "Haiku Model Name:"      "$haiku_n" \
+      "Subagent Model:"         "$subagent" \
+    )"
+    rc=$?
+    [ $rc -eq 0 ] || return 1
+  else
+    result="$(_ui_read_form "$title" \
+      "Auth Token"   "$tok" \
+      "Base URL"     "$url" \
+      "Opus Model"   "$opus" \
+      "Opus Model Name" "$opus_n" \
+      "Sonnet Model" "$sonnet" \
+      "Sonnet Model Name" "$sonnet_n" \
+      "Haiku Model"  "$haiku" \
+      "Haiku Model Name" "$haiku_n" \
+      "Subagent Model" "$subagent" \
+    )"
+  fi
+
+  # Parse result lines into variables
+  local -a lines=()
+  while IFS= read -r line; do
+    lines+=("$line")
+  done <<< "$result"
+
+  tok="${lines[0]}"
+  url="${lines[1]}"
+  opus="${lines[2]}"
+  opus_n="${lines[3]}"
+  sonnet="${lines[4]}"
+  sonnet_n="${lines[5]}"
+  haiku="${lines[6]}"
+  haiku_n="${lines[7]}"
+  subagent="${lines[8]}"
+
+  # Resolve path
+  local pf; pf="$(_profile_path "$name")" || return $?
+
+  # Extract existing custom vars (non-standard) before overwriting
+  local -a existing_keys=()
+  local -a existing_vals=()
+  if [ -n "$existing_file" ] && [ -f "$existing_file" ]; then
+    local -A existing_map
+    while IFS= read -r line; do
+      # Match: export KEY=VALUE or export KEY='VALUE' or export KEY="VALUE"
+      local ekey eval
+      ekey="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
+      [ -n "$ekey" ] || continue
+      eval="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*${ekey}=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
+      # Skip standard keys
+      case "$ekey" in
+        ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|\
+        ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL_NAME|\
+        ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL_NAME|\
+        ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME|\
+        CLAUDE_CODE_SUBAGENT_MODEL) continue ;;
+      esac
+      existing_keys+=("$ekey")
+      existing_vals+=("$eval")
+    done < "$existing_file"
+  fi
+
+  # Let user edit/add custom vars; returns updated keys+vals in _CUSTOM_KEYS/VALS
+  _add_custom_env_vars "$pf" existing_keys existing_vals
+
+  # Write profile with standard fields + updated custom vars
+  _write_profile "$pf" "$tok" "$url" "$opus" "$opus_n" "$sonnet" "$sonnet_n" "$haiku" "$haiku_n" "$subagent" "${_CUSTOM_KEYS[@]}" "${_CUSTOM_VALS[@]}"
+}
+
+# ─── Environment variable reference and custom var addition ──────────
+
+_resolve_env_ref() { # -> sets _ENV_REF to path of env_ref.txt
+  # Priority: same dir as ccm > ~/.cc-manager > ~/.config/cc-manager
+  local script_dir
+  script_dir="$(cd "$(dirname "$0")" && pwd)"
+  if [ -f "$script_dir/env_ref.txt" ]; then
+    _ENV_REF="$script_dir/env_ref.txt"
+  elif [ -f "$CCM_HOME/env_ref.txt" ]; then
+    _ENV_REF="$CCM_HOME/env_ref.txt"
+  else
+    _ENV_REF=""
+  fi
+}
+
+_search_env_ref() { # _search_env_ref <query> -> matching lines KEY|CAT|DESC to stdout
+  local query="$1"
+  [ -n "$_ENV_REF" ] && [ -f "$_ENV_REF" ] || return 1
+  if [ -z "$query" ]; then
+    grep -v '^#' "$_ENV_REF" | grep -v '^$'
+  else
+    grep -v '^#' "$_ENV_REF" | grep -v '^$' | grep -i -- "$query"
+  fi
+}
+
+_add_custom_env_vars() { # _add_custom_env_vars <profile_file> <keys_array_name> <vals_array_name>
+  _resolve_env_ref
+  local pf="$1"
+  local keys_ref="$2[@]" vals_ref="$3[@]"
+
+  # Read existing into local arrays
+  local -a ekeys=("${!keys_ref}")
+  local -a evals=("${!vals_ref}")
+
+  # _add_custom_env_vars_read/dialog sets _CUSTOM_KEYS/_CUSTOM_VALS globals
+  if _has_dialog && [ -n "$_ENV_REF" ]; then
+    _add_custom_env_vars_dialog "$pf" ekeys evals
+  else
+    _add_custom_env_vars_read "$pf" ekeys evals
+  fi
+  # Don't override — _read/_dialog already set _CUSTOM_KEYS/_CUSTOM_VALS
+}
+
+# Global return arrays for _add_custom_env_vars
+_CUSTOM_KEYS=()
+_CUSTOM_VALS=()
+
+_add_custom_env_vars_read() { # _add_custom_env_vars_read <profile_file> keys_ref vals_ref
+  local pf="$1"
+  local keys_ref="$2[@]" vals_ref="$3[@]"
+  local -a ekeys=("${!keys_ref}")
+  local -a evals=("${!vals_ref}")
+
+  # ── Phase 1: Review & edit existing custom vars ─────────────────────
+  if [ "${#ekeys[@]}" -gt 0 ]; then
+    printf '\n' >&2
+    printf '  %s\n' "$(_cc_bc '━━━ 现有自定义环境变量 ━━━')" >&2
+    printf '\n' >&2
+    local i=0
+    while [ "$i" -lt "${#ekeys[@]}" ]; do
+      local key="${ekeys[$i]}"
+      local val="${evals[$i]}"
+      printf '  %s %s  =  %s\n' "$(_cc_g '●')" "$(_cc_c "$key")" "$(_cc_y "$(_mask_preview "$val")")" >&2
+      i=$((i + 1))
+    done
+    printf '\n  %s\n' "$(_cc_d '逐行编辑: 回车保留 | 输入新值覆盖 | --delete 删除')" >&2
+    printf '  %s\n' "$(_cc_d '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')" >&2
+    printf '\n' >&2
+
+    i=0
+    while [ "$i" -lt "${#ekeys[@]}" ]; do
+      local key="${ekeys[$i]}"
+      local val="${evals[$i]}"
+      printf '  ✏️  %s\n' "$(_cc_c "$key")" >&2
+      printf '     当前值: %s\n' "$(_cc_y "$(_mask_preview "$val")")" >&2
+      printf '     新值: ' >&2
+      local answer
+      read -r answer
+      if [ "$answer" = "--delete" ] || [ "$answer" = "--del" ] || [ "$answer" = "--rm" ]; then
+        printf '     %s 已删除\n' "$(_cc_r '✖')" >&2
+        unset 'ekeys[$i]' 'evals[$i]'
+      elif [ -n "$answer" ]; then
+        evals[$i]="$answer"
+        printf '     %s 已更新\n' "$(_cc_g '✓')" >&2
+      else
+        printf '     %s 保留原值\n' "$(_cc_d '·')" >&2
+      fi
+      i=$((i + 1))
+    done
+
+    # Compact arrays
+    local -a compact_keys=() compact_vals=()
+    for i in "${!ekeys[@]}"; do
+      [ -n "${ekeys[$i]:-}" ] && { compact_keys+=("${ekeys[$i]}"); compact_vals+=("${evals[$i]}"); }
+    done
+    ekeys=("${compact_keys[@]}")
+    evals=("${compact_vals[@]}")
+    printf '\n' >&2
+  fi
+
+  # ── Phase 2: Add new custom vars ────────────────────────────────────
+  while true; do
+    # Search
+    if [ -n "$_ENV_REF" ]; then
+      printf '\n  %s\n' "$(_cc_bc '━━━ 搜索/添加环境变量 ━━━')" >&2
+      printf '  关键词%s: ' "$(_cc_d ' (留空显示全部)')" >&2
+      local query
+      read -r query
+      if [ -n "$query" ]; then
+        local results
+        results="$(_search_env_ref "$query")"
+        if [ -n "$results" ]; then
+          printf '\n  %s\n' "$(_cc_d '搜索结果')" >&2
+          while IFS='|' read -r key cat desc; do
+            printf '    %s  %s\n' "$(_cc_c "$key")" "$(_cc_d "$desc")" >&2
+          done <<< "$results"
+          printf '\n' >&2
+        else
+          printf '  %s 未找到匹配项\n\n' "$(_cc_r '✖')" >&2
+        fi
+      else
+        printf '\n  %s (前 50 项)\n' "$(_cc_d '全部环境变量')" >&2
+        _search_env_ref "" | head -50 | while IFS='|' read -r key cat desc; do
+          printf '    %s  %s\n' "$(_cc_c "$key")" "$(_cc_d "$desc")" >&2
+        done
+        printf '  %s\n\n' "$(_cc_d "... 共 $((_search_env_ref "" | wc -l)) 项, 输入关键词可缩小范围")" >&2
+      fi
+    fi
+
+    printf '  ➕ 变量名%s: ' "$(_cc_d ' (留空结束)')" >&2
+    local key
+    read -r key
+    [ -n "$key" ] || break
+
+    # Validate
+    if ! printf '%s' "$key" | grep -qE '^[A-Z][A-Z0-9_]*$'; then
+      printf '  %s 无效的变量名: %s\n\n' "$(_cc_r '✖')" "$(_cc_r "$key")" >&2
+      continue
+    fi
+
+    # Check if already exists
+    local found=0
+    for ek in "${ekeys[@]}"; do
+      [ "$ek" = "$key" ] && { found=1; break; }
+    done
+    [ "$found" -eq 1 ] && { printf '  %s 变量 %s 已存在\n\n' "$(_cc_r '✖')" "$(_cc_r "$key")" >&2; continue; }
+
+    # Get description
+    if [ -n "$_ENV_REF" ]; then
+      local desc
+      desc="$(grep "^${key}|" "$_ENV_REF" 2>/dev/null | head -1 | cut -d'|' -f3)"
+      [ -n "$desc" ] && printf '  %s %s\n' "$(_cc_d '└─')" "$(_cc_d "$desc")" >&2
+    fi
+
+    printf '  💎 %s 值: ' "$(_cc_c "$key")" >&2
+    local val
+    read -r val
+    [ -n "$val" ] || { printf '  %s 值为空，跳过\n\n' "$(_cc_d '·')" >&2; continue; }
+
+    ekeys+=("$key")
+    evals+=("$val")
+    printf '  %s 已添加\n' "$(_cc_g '✓')" >&2
+  done
+
+  # Return via globals
+  _CUSTOM_KEYS=("${ekeys[@]}")
+  _CUSTOM_VALS=("${evals[@]}")
+}
+
+_add_custom_env_vars_dialog() { # _add_custom_env_vars_dialog <profile_file> keys_ref vals_ref
+  local pf="$1"
+  local keys_ref="$2[@]" vals_ref="$3[@]"
+  local -a ekeys=("${!keys_ref}")
+  local -a evals=("${!vals_ref}")
+
+  # Phase 1: Review & edit existing custom vars
+  local i=0
+  while [ "$i" -lt "${#ekeys[@]}" ]; do
+    local key="${ekeys[$i]}"
+    local val="${evals[$i]}"
+    local tmpfile
+    tmpfile="$(mktemp)" || break
+    dialog --title "编辑自定义变量 [$i/$(( ${#ekeys[@]} - 1 ))]" \
+           --form "变量: $key" \
+           6 70 4 \
+           "KEY:" 0 2 "$key" 0 8 0 0 \
+           "VAL:" 1 2 "$val" 1 8 58 0 \
+           2>"$tmpfile"
+    local rc=$?
+    if [ $rc -ne 0 ]; then
+      rm -f "$tmpfile"
+      break  # User cancelled, keep current
+    fi
+    # Parse: line 0 = key (read-only), line 1 = new value
+    local result
+    result="$(cat "$tmpfile")"
+    rm -f "$tmpfile"
+    local -a lines=()
+    while IFS= read -r line; do
+      lines+=("$line")
+    done <<< "$result"
+    local newval="${lines[1]:-}"
+
+    if [ -z "$newval" ]; then
+      # Empty in dialog = delete
+      printf '%s\n' "$(_cc_r '✖ 已删除')" "$key" >&2
+      unset 'ekeys[$i]' 'evals[$i]'
+    elif [ "$newval" = "$val" ]; then
+      printf '%s\n' "$(_cc_d '· 保留')" "$key" >&2
+    else
+      evals[$i]="$newval"
+      printf '%s\n' "$(_cc_g '✓ 已更新')" "$key" >&2
+    fi
+    i=$((i + 1))
+  done
+
+  # Compact arrays
+  local -a compact_keys=() compact_vals=()
+  for i in "${!ekeys[@]}"; do
+    [ -n "${ekeys[$i]:-}" ] && { compact_keys+=("${ekeys[$i]}"); compact_vals+=("${evals[$i]}"); }
+  done
+  ekeys=("${compact_keys[@]}")
+  evals=("${compact_vals[@]}")
+
+  # Phase 2: Add new custom vars
+  while true; do
+    local term_w
+    term_w="$(tput cols 2>/dev/null || echo 80)"
+    [ "$term_w" -lt 60 ] && term_w=60
+    [ "$term_w" -gt 90 ] && term_w=90
+
+    # Search query
+    local tmpfile
+    tmpfile="$(mktemp)" || break
+    trap 'rm -f "$tmpfile"' RETURN
+
+    dialog --title "添加自定义环境变量" \
+           --form "输入关键词搜索, 或留空显示全部" \
+           7 "$term_w" 4 \
+           "搜索:" 0 42 "" 0 44 "$((term_w - 48))" 0 \
+           2>"$tmpfile"
+
+    local rc=$?
+    if [ $rc -ne 0 ]; then
+      rm -f "$tmpfile"
+      break
+    fi
+
+    local query
+    query="$(cat "$tmpfile")"
+    rm -f "$tmpfile"
+
+    # Show results and get key/val
+    local results=""
+    if [ -n "$_ENV_REF" ]; then
+      results="$(_search_env_ref "$query")"
+    fi
+
+    tmpfile="$(mktemp)" || break
+    local -a args=()
+    local row=0
+
+    if [ -n "$results" ]; then
+      local count=0
+      while IFS='|' read -r key cat desc; do
+        args+=("$key ($desc)" "$row" 0 "(只读)" "$row" 1 0 0)
+        row=$((row + 1))
+        count=$((count + 1))
+        [ "$count" -ge 8 ] && break
+      done <<< "$results"
+    fi
+
+    local key_row=$row
+    args+=("变量名(留空结束):" "$row" 0 "" "$row" 17 "$((term_w - 18))" 0)
+    row=$((row + 1))
+
+    local val_row=$row
+    args+=("值:" "$row" 0 "" "$row" 11 "$((term_w - 14))" 0)
+
+    local h=$(( row + 8 ))
+    dialog --title "添加自定义环境变量" \
+           --insecure \
+           --form "" \
+           "$h" "$term_w" 4 \
+           "${args[@]}" \
+           2>"$tmpfile"
+
+    rc=$?
+    if [ $rc -ne 0 ]; then
+      rm -f "$tmpfile"
+      break
+    fi
+
+    local result
+    result="$(cat "$tmpfile")"
+    rm -f "$tmpfile"
+
+    local -a lines=()
+    while IFS= read -r line; do
+      lines+=("$line")
+    done <<< "$result"
+
+    local key="${lines[$key_row]:-}"
+    local val="${lines[$val_row]:-}"
+
+    [ -n "$key" ] || break
+    [ -n "$val" ] || continue
+
+    if ! printf '%s' "$key" | grep -qE '^[A-Z][A-Z0-9_]*$'; then
+      dialog --title "错误" --msgbox "无效的变量名: $key" 5 40
+      continue
+    fi
+
+    # Check if already exists
+    local found=0
+    for ek in "${ekeys[@]}"; do
+      [ "$ek" = "$key" ] && { found=1; break; }
+    done
+    [ "$found" -eq 1 ] && { dialog --title "跳过" --msgbox "变量 $key 已存在" 5 30; continue; }
+
+    ekeys+=("$key")
+    evals+=("$val")
+    dialog --title "成功" --msgbox "已添加 $key" 5 30
+  done
+
+  _CUSTOM_KEYS=("${ekeys[@]}")
+  _CUSTOM_VALS=("${evals[@]}")
+}
+
 cmd_list() {
   _ensure_skeleton
   local found=0 f name url line
@@ -97,10 +707,14 @@ cmd_new() {
   _ensure_skeleton
   local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] && _die 1 "profile '$name' 已存在(用 'ccm edit $name')"
-  cp "$TEMPLATE" "$pf"
-  chmod 600 "$pf"
-  echo "已创建 $pf"
-  "${EDITOR:-vi}" "$pf"
+
+  if _interactive_profile "new" "$name"; then
+    printf '%s %s\n' "$(_cc_g '✓')" "已创建 $(_cc_c "$pf")"
+  else
+    rm -f "$pf"
+    printf '%s 已取消\n' "$(_cc_r '✖')" >&2
+    exit 1
+  fi
 }
 
 cmd_edit() {
@@ -108,7 +722,13 @@ cmd_edit() {
   [ -n "$name" ] || _die 2 "用法: ccm edit <profile>"
   local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在(用 'ccm new $name')"
-  "${EDITOR:-vi}" "$pf"
+
+  if _interactive_profile "edit" "$name" "$pf"; then
+    printf '%s %s\n' "$(_cc_g '✓')" "已更新 $(_cc_c "$pf")"
+  else
+    printf '%s 已取消，未保存更改\n' "$(_cc_r '✖')" >&2
+    exit 1
+  fi
 }
 
 cmd_show() {
@@ -127,7 +747,7 @@ cmd_show() {
     cat "$pf"
     return
   fi
-  # 打码:对 ANTHROPIC_AUTH_TOKEN 的值做掩码,其余原样
+  # 打码显示: token 掩码,其余原样
   local line val
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
@@ -135,8 +755,46 @@ cmd_show() {
         val="${line#*=}"
         val="${val%\"}"; val="${val#\"}"
         val="${val%\'}"; val="${val#\'}"
-        printf 'export ANTHROPIC_AUTH_TOKEN="%s"\n' "$(_mask "$val")"
+        printf '  %s %s="%s"\n' "$(_cc_g '●')" "$(_cc_c 'ANTHROPIC_AUTH_TOKEN')" "$(_mask "$val")"
         ;;
+      *export\ ANTHROPIC_BASE_URL=*)
+        val="${line#*=}"
+        val="${val%\"}"; val="${val#\"}"
+        val="${val%\'}"; val="${val#\'}"
+        printf '  %s %s=%s\n' "$(_cc_g '●')" "$(_cc_c 'ANTHROPIC_BASE_URL')" "$(_cc_y "$val")"
+        ;;
+      *export\ ANTHROPIC_DEFAULT_*|*export\ CLAUDE_CODE_SUBAGENT_MODEL*)
+        # Standard model vars: show key + colored value
+        local k v
+        k="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
+        v="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*[A-Z_][A-Z0-9_]*=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
+        if [ -n "$k" ] && [ -n "$v" ]; then
+          printf '  %s %s=%s\n' "$(_cc_g '●')" "$(_cc_c "$k")" "$(_cc_y "$v")"
+        else
+          printf '  %s\n' "$(_cc_d "$line")"
+        fi
+        ;;
+      *export\ *CLAUDE_CODE_*|*export\ *BASH_*|*export\ *API_*|*export\ *MCP_*|*export\ *DEBUG*|*export\ *DISABLE_*|*export\ *ENABLE_*|*export\ *MAX_*|*export\ *HTTP_*|*export\ *NO_*)
+        # Custom env vars: show key + yellow value
+        local k v
+        k="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
+        v="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*[A-Z_][A-Z0-9_]*=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
+        if [ -n "$k" ] && [ -n "$v" ]; then
+          printf '  %s %s=%s\n' "$(_cc_y '◆')" "$(_cc_c "$k")" "$(_cc_y "$v")"
+        else
+          printf '  %s\n' "$(_cc_d "$line")"
+        fi
+        ;;
+      *"# 自定义环境变量"*)
+        printf '\n  %s\n' "$(_cc_br '━━━ 自定义环境变量 ━━━')"
+        ;;
+      *"# 模型映射"*|*"# 可选:子代理模型"*)
+        printf '  %s\n' "$(_cc_d "$line")"
+        ;;
+      *"# cc-manager profile"*)
+        printf '\n  %s\n' "$(_cc_bc "━━━ profile: $name ━━━")"
+        ;;
+      *'#'*) printf '  %s\n' "$(_cc_d "$line")" ;;
       *) printf '%s\n' "$line" ;;
     esac
   done <"$pf"
@@ -150,15 +808,53 @@ cmd_env() {
   printf '%s\n' "$pf"
 }
 
+cmd_envref() {
+  _resolve_env_ref
+  if [ -z "$_ENV_REF" ] || [ ! -f "$_ENV_REF" ]; then
+    _die 1 "未找到 env_ref.txt(请确认已安装 ccm 完整代码)"
+  fi
+
+  local query="" a
+  for a in "$@"; do
+    case "$a" in
+      -*) _die 2 "未知选项: $a" ;;
+      *) query="$query $a" ;;
+    esac
+  done
+  query="${query# }"  # strip leading space
+
+  if [ -n "$query" ]; then
+    printf '搜索: %s\n\n' "$query"
+    _search_env_ref "$query" | while IFS='|' read -r key cat desc; do
+      printf '  %-45s %-10s %s\n' "$key" "$cat" "$desc"
+    done
+    local count
+    count="$(_search_env_ref "$query" | wc -l)"
+    printf '\n共 %d 项\n' "$count"
+  else
+    printf '用法: ccm envref [关键词...]\n\n'
+    printf '示例:\n'
+    printf '  ccm envref timeout          搜索含 timeout 的变量\n'
+    printf '  ccm envref tui              搜索 TUI 相关变量\n'
+    printf '  ccm envref CLAUDE_CODE_NO   搜索特定前缀\n'
+    printf '  ccm envref                  显示全部 (%d 项)\n\n' "$(_search_env_ref "" | wc -l)"
+    # Show categorized summary
+    printf '分类统计:\n'
+    _search_env_ref "" | cut -d'|' -f2 | sort | uniq -c | sort -rn | while read -r n cat; do
+      printf '  %-12s %d\n' "$cat" "$n"
+    done
+  fi
+}
+
 cmd_rm() {
   local name="$1"
   [ -n "$name" ] || _die 2 "用法: ccm rm <profile>"
   local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
-  printf "确认删除 profile '%s'? [y/N] " "$name"
+  printf "%s确认删除 profile '%s'? [y/N] " "$(_cc_r '⚠ ')" "$name"
   local ans; read -r ans
   case "$ans" in
-    y|Y|yes|YES) rm -f "$pf"; echo "已删除 $name" ;;
+    y|Y|yes|YES) rm -f "$pf"; printf '%s %s\n' "$(_cc_r '✖')" "已删除 $(_cc_r "$name")" ;;
     *) echo "已取消" ;;
   esac
 }
@@ -247,6 +943,7 @@ cc-manager (ccm) — 管理多个 Claude Code 环境
   ccm show <profile> [--raw]
   ccm rm <profile>
   ccm env <profile>
+  ccm envref [关键词...]
   ccm help | -h | --help
   ccm version | --version
 EOF
@@ -263,6 +960,7 @@ main() {
     show) cmd_show "$@" ;;
     rm) cmd_rm "$@" ;;
     env) cmd_env "$@" ;;
+    envref) cmd_envref "$@" ;;
     run) cmd_run "$@" ;;
     *) _die 2 "未知命令: $cmd(运行 'ccm help')" ;;
   esac

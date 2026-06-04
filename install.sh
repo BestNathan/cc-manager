@@ -78,7 +78,7 @@ _download_remote() {
   echo "→ 下载必要文件到 $tmpdir ..."
 
   local base="https://raw.githubusercontent.com/BestNathan/cc-manager/$CCM_BRANCH"
-  local files=("ccm" "install.sh" "template.env" "completions/_ccm")
+  local files=("ccm" "install.sh" "template.env" "env_ref.txt" "completions/_ccm")
   for f in "${files[@]}"; do
     mkdir -p "$tmpdir/$(dirname "$f")"
     if ! _remote_fetch "$base/$f" "$tmpdir/$f"; then
@@ -119,6 +119,10 @@ _install() {
   mkdir -p "$CCM_HOME/profiles" "$CCM_HOME/completions"
   if [ ! -f "$CCM_HOME/template.env" ]; then
     cp "$src_dir/template.env" "$CCM_HOME/template.env"
+  fi
+  if [ -f "$src_dir/env_ref.txt" ]; then
+    cp "$src_dir/env_ref.txt" "$CCM_HOME/env_ref.txt"
+    echo "✓ 已安装环境变量参考: $CCM_HOME/env_ref.txt"
   fi
   if [ -f "$src_dir/completions/_ccm" ]; then
     cp "$src_dir/completions/_ccm" "$CCM_HOME/completions/_ccm"
