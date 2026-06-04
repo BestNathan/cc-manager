@@ -4,11 +4,33 @@
 
 ## 安装
 
+### 一键远程安装(无需 git clone)
+
 ```bash
-git clone <repo> cc-manager && cd cc-manager
-./install.sh                 # 自动探测 bin 目录(Linux/macOS)
-# 或指定: CCM_BIN_DIR=~/.local/bin ./install.sh
+# 直接下载安装(仅下载必要文件,不留存源码)
+curl -fsSL https://raw.githubusercontent.com/BestNathan/cc-manager/main/install.sh | bash
 ```
+
+### Clone 源码安装
+
+```bash
+# 自动 clone 仓库到 ~/.cc-manager/src 并安装
+curl -fsSL https://raw.githubusercontent.com/BestNathan/cc-manager/main/install.sh | bash -s -- --clone
+# 或手动 clone 后安装:
+git clone https://github.com/BestNathan/cc-manager.git && cd cc-manager
+./install.sh
+```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `CCM_HOME` | `~/.cc-manager` | 配置目录 |
+| `CCM_BIN_DIR` | 自动探测 | ccm 软链目标 |
+| `CCM_REPO` | 本仓库地址 | clone 模式用的仓库 URL |
+| `CCM_BRANCH` | `main` | clone 的分支 |
+| `CCM_SRC_DIR` | `$CCM_HOME/src` | clone 模式源码存放路径 |
+| `CCM_CLONE` | 空 | 设为 `1` 等同于传 `--clone` |
 
 按提示把 bin 目录与补全 `fpath` 加入你的 shell rc,然后 `exec $SHELL`。
 
