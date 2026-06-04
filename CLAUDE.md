@@ -61,7 +61,7 @@ Self-contained Bash script with no external dependencies (beyond `bash`). Struct
    - `_profile_path <name>` — resolves `~/.cc-manager/profiles/<name>.env`
    - `_check_settings_anthropic` — scans `.claude/settings.json` and `~/.claude/settings.json` for `env.ANTHROPIC_*` conflicts (uses `jq` if available, falls back to `grep`)
    - `_mask` — redacts secrets for display
-3. **Subcommands** (`cmd_*`): `list`, `new`, `edit`, `show`, `env`, `rm`, `run`
+3. **Subcommands** (`cmd_*`): `list`, `new`, `edit`, `show`, `env`, `rm`, `backup`, `run`
 4. **`main`** (bottom): dispatches on `$1` (default: `help`)
 
 ### `ccm run` flow
@@ -89,3 +89,7 @@ Three modes: local (from repo), piped (`curl | bash`), clone (`--clone` flag). C
 - Profile files stored as plaintext `.env` (file-permission protected, not encrypted)
 - Settings conflict detection requires `jq` for full precision; falls back to `grep`
 - Linux/macOS only
+
+## Autocompletion Constraint
+
+**When adding or modifying any command/subcommand, you MUST also update `completions/_ccm` accordingly.** This is a hard requirement — never commit command changes without updating zsh autocompletion in the same commit.

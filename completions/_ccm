@@ -32,6 +32,24 @@ _ccm() {
     edit|show|rm|env)
       _ccm_profiles
       ;;
+    backup)
+      # ccm backup <profile> 或 ccm backup restore <profile> <N>
+      if [[ "${words[3]}" == "restore" ]]; then
+        if (( CURRENT == 5 )); then
+          # <N>: 补全 1-5
+          compadd -- 1 2 3 4 5
+        elif (( CURRENT == 4 )); then
+          # <profile>
+          _ccm_profiles
+        fi
+      elif (( CURRENT == 3 )); then
+        # 可能是 "restore" 也可能是 "<profile>"
+        compadd -- restore
+        _ccm_profiles
+      else
+        _ccm_profiles
+      fi
+      ;;
   esac
 }
 
