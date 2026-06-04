@@ -115,6 +115,79 @@ _mask() { # _mask <secret> -> 头4***尾4(过短则全星)
   if [ "$n" -le 8 ]; then printf '****'; else printf '%s***%s' "${s:0:4}" "${s: -4}"; fi
 }
 
+# ─── Backup helpers ──────────────────────────────────────────────────
+
+_BACKUP_MAX=5
+
+_rotate_backups() { # _rotate_backups <file> — shift back.N down, save current as back.1
+  local file="$1"
+  [ -f "$file" ] || return 0
+
+  # Remove oldest if at cap
+  rm -f "${file}.back.${_BACKUP_MAX}"
+
+  # Shift: back.4→back.5, back.3→back.4, ..., back.1→back.2
+  local i=$((_BACKUP_MAX - 1))
+  while [ "$i" -ge 1 ]; do
+    if [ -f "${file}.back.${i}" ]; then
+      mv "${file}.back.${i}" "${file}.back.$((i + 1))"
+    fi
+    i=$((i - 1))
+  done
+
+  # Current file → back.1
+  cp -p "$file" "${file}.back.1"
+}
+
+_restore_backup() { # _restore_backup <file> <N> — restore back.N, roll current→back.1, back.1→back.2, ..., back.(N-1)→back.N
+  local file="$1" n="$2"
+  [ -f "$file" ] || _die 1 "profile 文件不存在: $file"
+  [ -f "${file}.back.${n}" ] || _die 1 "备份 back.${n} 不存在"
+
+  # Save current content for rollback
+  local current_content
+  current_content="$(cat "$file")"
+
+  # Save the target backup content (will become new current file)
+  local restore_content
+  restore_content="$(cat "${file}.back.${n}")"
+
+  # Shift: current → back.1, back.1 → back.2, ..., back.(N-1) → back.N
+  # Work backwards from N-1 to 1 to avoid overwriting
+  local i=$((n - 1))
+  while [ "$i" -ge 1 ]; do
+    if [ -f "${file}.back.${i}" ]; then
+      mv "${file}.back.${i}" "${file}.back.$((i + 1))"
+    fi
+    i=$((i - 1))
+  done
+
+  # Current → back.1
+  printf '%s\n' "$current_content" > "${file}.back.1"
+
+  # Restore content → current file
+  printf '%s\n' "$restore_content" > "$file"
+  chmod 600 "$file"
+}
+
+_list_backups() { # _list_backups <file> <name> — list all backups with metadata
+  local file="$1" name="$2"
+  local found=0 i
+  for i in $(seq 1 "$_BACKUP_MAX"); do
+    [ -f "${file}.back.${i}" ] || continue
+    found=1
+    local size mtime base_url
+    size="$(wc -c < "${file}.back.${i}" | tr -d ' ')"
+    mtime="$(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "${file}.back.${i}" 2>/dev/null || stat -c '%y' "${file}.back.${i}" 2>/dev/null | cut -d'.' -f1 | tr 'T' ' ')"
+    base_url="$(grep -E '^[[:space:]]*export[[:space:]]+ANTHROPIC_BASE_URL=' "${file}.back.${i}" 2>/dev/null | head -1)"
+    base_url="${base_url#*=}"
+    base_url="${base_url%\"}"; base_url="${base_url#\"}"
+    base_url="${base_url%\'}"; base_url="${base_url#\'}"
+    printf '  [%s] back.%s  %s  (%s bytes)  %s\n' "$(_cc_c "$i")" "$i" "$(_cc_d "$mtime")" "$(_cc_d "$size")" "$(_cc_y "${base_url:-(no base_url)}")"
+  done
+  [ "$found" -eq 1 ]
+}
+
 # ─── Profile UI helpers ─────────────────────────────────────
 
 _parse_env_value() { # _parse_env_value <file> <VAR_NAME> -> stdout value
@@ -723,8 +796,15 @@ cmd_edit() {
   local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在(用 'ccm new $name')"
 
+  # Backup current file before editing
+  _rotate_backups "$pf"
+
   if _interactive_profile "edit" "$name" "$pf"; then
     printf '%s %s\n' "$(_cc_g '✓')" "已更新 $(_cc_c "$pf")"
+    # Show backup hint if backups exist
+    if [ -f "${pf}.back.1" ]; then
+      printf '  %s 使用 %s 查看备份记录\n' "$(_cc_d '💡')" "$(_cc_c "ccm backup $name")"
+    fi
   else
     printf '%s 已取消，未保存更改\n' "$(_cc_r '✖')" >&2
     exit 1
@@ -859,6 +939,68 @@ cmd_rm() {
   esac
 }
 
+cmd_backup() {
+  local name="" action="" a
+
+  # Parse: first non-flag arg is profile name; second (if "restore") is action
+  for a in "$@"; do
+    case "$a" in
+      restore) action="restore" ;;
+      *)
+        if [ -z "$name" ]; then
+          name="$a"
+        fi
+        ;;
+    esac
+  done
+
+  [ -n "$name" ] || _die 2 "用法: ccm backup <profile>"
+
+  local pf; pf="$(_profile_path "$name")" || exit $?
+  [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
+
+  if [ "$action" = "restore" ]; then
+    local n=""
+    for a in "$@"; do
+      case "$a" in restore|"$name") continue ;; *) n="$a"; break ;; esac
+    done
+    [ -n "$n" ] || _die 2 "用法: ccm backup restore <profile> <N>"
+
+    # Validate N is a number
+    case "$n" in
+      ''|*[!0-9]*) _die 2 "备份序号必须是数字: '$n'" ;;
+    esac
+    [ "$n" -ge 1 ] && [ "$n" -le "$_BACKUP_MAX" ] || _die 2 "备份序号必须在 1~${_BACKUP_MAX} 之间"
+
+    # Confirm before restoring
+    printf '%s 确认回滚 profile %s 到 back.%s? [y/N] ' "$(_cc_r '⚠ ')" "$(_cc_c "$name")" "$n"
+    local ans; read -r ans
+    case "$ans" in
+      y|Y|yes|YES) ;;
+      *) echo "已取消"; exit 0 ;;
+    esac
+
+    _restore_backup "$pf" "$n"
+
+    printf '%s 已回滚 %s 到 back.%s\n' "$(_cc_g '✓')" "$(_cc_c "$pf")" "$n"
+    printf '  %s 当前版本已保存为 back.1\n' "$(_cc_d '💡')"
+    printf '  %s 使用 %s 查看备份记录\n' "$(_cc_d '💡')" "$(_cc_c "ccm backup $name")"
+  else
+    # list (default)
+    printf '\n  %s\n' "$(_cc_bc "━━━ profile: $name 的备份 ━━━")"
+    printf '\n'
+
+    if _list_backups "$pf" "$name"; then
+      printf '\n'
+      printf '  %s\n' "$(_cc_d '💡 回滚: ccm backup restore '"$name"' <序号>')"
+      printf '\n'
+    else
+      printf '  %s\n' "$(_cc_d '(暂无备份)')"
+      printf '\n'
+    fi
+  fi
+}
+
 usage_run() {
   echo "用法: ccm run <profile> [--opus M] [--sonnet M] [--haiku M] [--subagent M] [-- <claude args>]" >&2
 }
@@ -942,6 +1084,8 @@ cc-manager (ccm) — 管理多个 Claude Code 环境
   ccm edit <profile>
   ccm show <profile> [--raw]
   ccm rm <profile>
+  ccm backup <profile>             # 查看备份
+  ccm backup restore <profile> <N> # 回滚到指定备份
   ccm env <profile>
   ccm envref [关键词...]
   ccm help | -h | --help
@@ -959,6 +1103,7 @@ main() {
     edit) cmd_edit "$@" ;;
     show) cmd_show "$@" ;;
     rm) cmd_rm "$@" ;;
+    backup) cmd_backup "$@" ;;
     env) cmd_env "$@" ;;
     envref) cmd_envref "$@" ;;
     run) cmd_run "$@" ;;
