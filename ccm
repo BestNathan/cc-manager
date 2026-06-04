@@ -44,6 +44,32 @@ _profile_path() {
   printf '%s/%s.env' "$PROFILES_DIR" "$1"
 }
 
+_check_settings_anthropic() {
+  local file="$1"
+  [ -f "$file" ] || return
+  local keys
+  if command -v jq >/dev/null 2>&1; then
+    keys="$(jq -r '.env // {} | keys[]' "$file" 2>/dev/null | grep '^ANTHROPIC_')" || return
+    [ -z "$keys" ] && return
+    local k val
+    while IFS= read -r k; do
+      [ -n "$k" ] || continue
+      val="$(jq -r ".env[\"$k\"] // \"\"" "$file" 2>/dev/null)"
+      [ -n "$val" ] && printf '  %s="%s"\n' "$k" "$(_mask "$val")"
+    done <<<"$keys"
+  else
+    # 无 jq 时退化为 grep: 捕获 "ANTHROPIC_" 字符串出现即告警
+    keys="$(grep -o '"ANTHROPIC_[A-Z_]*"' "$file" 2>/dev/null | tr -d '"')" || return
+    [ -z "$keys" ] && return
+    local k val
+    while IFS= read -r k; do
+      [ -n "$k" ] || continue
+      val="$(grep -o "\"${k}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" 2>/dev/null | head -1 | sed 's/.*: *"//;s/"$//')"
+      [ -n "$val" ] && printf '  %s="%s"\n' "$k" "$(_mask "$val")"
+    done <<<"$keys"
+  fi
+}
+
 _mask() { # _mask <secret> -> 头4***尾4(过短则全星)
   local s="$1" n=${#1}
   if [ "$n" -le 8 ]; then printf '****'; else printf '%s***%s' "${s:0:4}" "${s: -4}"; fi
@@ -177,6 +203,32 @@ cmd_run() {
 
   [ -n "$ANTHROPIC_AUTH_TOKEN" ] || echo "cc-manager: 警告 — ANTHROPIC_AUTH_TOKEN 为空" >&2
   [ -n "$ANTHROPIC_BASE_URL" ]   || echo "cc-manager: 警告 — ANTHROPIC_BASE_URL 为空" >&2
+
+  # 检查 settings.json 中是否有 env.ANTHROPIC_* 会覆盖 profile 环境变量
+  local project_settings="$PWD/.claude/settings.json"
+  local user_settings="$HOME/.claude/settings.json"
+  local found_conflict=0
+  for sf in "$project_settings" "$user_settings"; do
+    local result
+    result="$(_check_settings_anthropic "$sf")"
+    if [ -n "$result" ]; then
+      if [ "$found_conflict" -eq 0 ]; then
+        echo "" >&2
+        echo "cc-manager: 警告 — 检测到以下 settings.json 中的 env.ANTHROPIC_* 配置将覆盖当前 profile 环境变量:" >&2
+        found_conflict=1
+      fi
+      if [ "$sf" = "$project_settings" ]; then
+        echo "  [项目] $sf" >&2
+      else
+        echo "  [用户] $sf" >&2
+      fi
+      echo "$result" >&2
+    fi
+  done
+  if [ "$found_conflict" -eq 1 ]; then
+    echo "  → profile 的对应变量可能不生效" >&2
+    sleep 1
+  fi
 
   command -v claude >/dev/null 2>&1 || _die 127 "未找到 'claude' 命令(请确认已安装并在 PATH 中)"
 

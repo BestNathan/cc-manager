@@ -43,7 +43,17 @@ profile 名不能包含 `/` 或 `..`(防路径穿越)。
 bash tests/run_all.sh
 ```
 
+## 冲突检测
+
+`ccm run` 启动前会自动扫描项目级(`.claude/settings.json`)和用户级(`~/.claude/settings.json`)的 settings 文件。
+如果检测到 `env.ANTHROPIC_*` 配置,会打印告警提示。
+
+> **注意**:当 settings.json 中配置了 `env.ANTHROPIC_*` 时,该配置会覆盖 profile 文件中对应的环境变量,导致 profile 中的对应设置**不生效**。
+>
+> **注意**:动态修改 settings.json 中的 `env` 会**立即影响当前正在运行的 Claude Code 会话**,无需重启。
+
 ## 限制
 
 - 仅支持 Linux / macOS。
 - token 以明文存于 .env(依赖文件权限),非加密存储。
+- settings 冲突检测依赖 `jq`(如无 `jq` 则退化为 grep 匹配,精确度略低)。
