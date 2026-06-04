@@ -55,11 +55,31 @@ main() {
     echo "    export PATH=\"$bindir:\$PATH\""
   fi
 
-  # 4. 补全提示
-  echo "✓ 补全已放到 $CCM_HOME/completions/_ccm"
-  echo "  在 $(_shell_rc) 追加(若未配置 fpath):"
-  echo "    fpath=($CCM_HOME/completions \$fpath)"
-  echo "    autoload -Uz compinit && compinit"
+  # 4. zsh 补全自动安装
+  local rc="$(_shell_rc)"
+  if [ "${SHELL##*/}" = zsh ] && command -v zsh >/dev/null 2>&1; then
+    local fpath_line="fpath=($CCM_HOME/completions \$fpath)"
+    local compinit_line="autoload -Uz compinit && compinit"
+    local need_write=0
+    if ! grep -qF "$fpath_line" "$rc" 2>/dev/null; then
+      echo "$fpath_line" >> "$rc"
+      need_write=1
+    fi
+    if ! grep -qF "compinit" "$rc" 2>/dev/null; then
+      echo "$compinit_line" >> "$rc"
+      need_write=1
+    fi
+    if [ "$need_write" -eq 1 ]; then
+      echo "✓ 已自动写入 zsh 补全配置到 $rc"
+    else
+      echo "✓ zsh 补全配置已存在,跳过"
+    fi
+  else
+    echo "✓ 补全已放到 $CCM_HOME/completions/_ccm"
+    echo "  在 $rc 追加(若未配置 fpath):"
+    echo "    fpath=($CCM_HOME/completions \$fpath)"
+    echo "    autoload -Uz compinit && compinit"
+  fi
 
   echo "✓ 完成。试试: ccm list"
 }
