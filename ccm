@@ -261,18 +261,8 @@ _has_gum() { # _has_gum -> 0 if gum is available, not disabled, and TTY exists
 _ui_gum_input() { # _ui_gum_input <label> <hint> <initial> <password:0|1> -> stdout result
   local label="$1" hint="$2" initial="$3" password="${4:-0}"
 
-  # Show label
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━ $label ━━━")" >&2
-  [ -n "$hint" ] && printf '  %s\n' "$(_cc_d "$hint")" >&2
-  printf '\n' >&2
-
-  if [ -n "$initial" ]; then
-    printf '  %s %s\n' "$(_cc_d '当前值:')" "$(_cc_y "$(_mask_preview "$initial")")" >&2
-  fi
-
-  # Build gum command safely using an array (no eval)
-  local -a cmd=(gum input --width 60)
+  # Build gum command — use gum's own styled rendering for the header
+  local -a cmd=(gum input --width 60 --header "$label" --header-style "bold,foreground=6")
   [ "$password" -eq 1 ] && cmd+=(--password)
   [ -n "$initial" ] && cmd+=(--value "$initial")
   cmd+=(--placeholder "$hint")
