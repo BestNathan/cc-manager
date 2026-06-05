@@ -110,10 +110,99 @@ _clone_repo() {
 }
 
 # ---------------------------------------------------------------------------
+# 可选依赖安装（非强制,安装失败不阻断后续流程）
+# ---------------------------------------------------------------------------
+
+# 可选依赖注册表
+# 格式: _OPT_DEPS=(
+#   "check_cmd|pkg_mgr:pkg_name[|pkg_mgr:pkg_name...]"
+# )
+#   check_cmd — 用于检测是否已安装的命令名
+#   pkg_mgr   — 包管理器: brew | apt | yum | dnf | pacman
+#   pkg_name  — 对应包管理器的包名
+# 依次尝试每个 pkg_mgr:pkg_name,该包管理器不存在则跳过
+_OPT_DEPS=(
+  "jq|brew:jq|apt:jq|yum:jq|dnf:jq|pacman:jq"
+)
+
+# 检查某个命令是否已可用
+_cmd_exists() { command -v "$1" >/dev/null 2>&1; }
+
+# 检查某个包管理器是否可用
+_pkg_mgr_available() {
+  case "$1" in
+    brew)   command -v brew >/dev/null 2>&1 ;;
+    apt)    command -v apt-get >/dev/null 2>&1 ;;
+    yum)    command -v yum >/dev/null 2>&1 ;;
+    dnf)    command -v dnf >/dev/null 2>&1 ;;
+    pacman) command -v pacman >/dev/null 2>&1 ;;
+    *)      return 1 ;;
+  esac
+}
+
+# 用指定包管理器安装单个包
+_pkg_install() {
+  local mgr="$1" pkg="$2"
+  case "$mgr" in
+    brew)   brew install --quiet "$pkg" 2>/dev/null ;;
+    apt)    sudo apt-get install -y -qq "$pkg" 2>/dev/null ;;
+    yum)    sudo yum install -y -q "$pkg" 2>/dev/null ;;
+    dnf)    sudo dnf install -y -q "$pkg" 2>/dev/null ;;
+    pacman) sudo pacman -S --noconfirm --quiet "$pkg" 2>/dev/null ;;
+    *)      return 1 ;;
+  esac
+}
+
+# 遍历注册表安装所有可选依赖
+_install_optional_deps() {
+  local os; os="$(uname -s)"
+  echo "→ 检查可选依赖 (平台: $os) ..."
+
+  local dep check_cmd entry mgr pkg installed
+  for dep in "${_OPT_DEPS[@]}"; do
+    # 第一个字段是 check_cmd
+    check_cmd="${dep%%|*}"
+    local rest="${dep#*|}"
+
+    # 已存在则跳过
+    if _cmd_exists "$check_cmd"; then
+      echo "  ✓ $check_cmd 已安装"
+      continue
+    fi
+
+    installed=0
+    # 依次尝试每个 pkg_mgr:pkg_name
+    IFS='|' read -ra entries <<< "$rest"
+    for entry in "${entries[@]}"; do
+      mgr="${entry%%:*}"
+      pkg="${entry#*:}"
+
+      # 该包管理器不存在,跳过
+      _pkg_mgr_available "$mgr" || continue
+
+      echo -n "  → 安装 $check_cmd ($pkg via $mgr)... "
+      if _pkg_install "$mgr" "$pkg" && _cmd_exists "$check_cmd"; then
+        echo "✓ 已安装 $check_cmd"
+        installed=1
+        break
+      else
+        echo "✗ 失败,尝试其他方式..." >&2
+      fi
+    done
+
+    [ "$installed" -eq 1 ] || echo "  ✗ $check_cmd 安装失败（可选,不影响核心功能）"
+  done
+}
+
+# ---------------------------------------------------------------------------
 # 安装主逻辑
 # ---------------------------------------------------------------------------
 _install() {
   local src_dir="$1"
+
+  # 0. 可选依赖（不阻断）
+  _install_optional_deps
+  echo ""
 
   # 1. 骨架
   mkdir -p "$CCM_HOME/profiles" "$CCM_HOME/completions"

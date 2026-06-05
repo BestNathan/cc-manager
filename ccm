@@ -205,11 +205,6 @@ _mask_preview() { # _mask_preview <value> -> short preview for display
   fi
 }
 
-_has_dialog() {
-  # If CCM_NO_DIALOG is set, force fallback to read prompts
-  [ -z "${CCM_NO_DIALOG:-}" ] && command -v dialog >/dev/null 2>&1
-}
-
 _write_profile() { # _write_profile <file> <tok> <url> <opus> <opus_n> <sonnet> <sonnet_n> <haiku> <haiku_n> <subagent>
   local file="$1" tok="$2" url="$3"
   local opus="$4" opus_n="$5" sonnet="$6" sonnet_n="$7"
@@ -224,11 +219,17 @@ _write_profile() { # _write_profile <file> <tok> <url> <opus> <opus_n> <sonnet> 
     printf 'export ANTHROPIC_BASE_URL=%s\n' "$(_qval "$url")"
     printf '\n# 模型映射(按需修改)\n'
     printf 'export ANTHROPIC_DEFAULT_OPUS_MODEL=%s\n' "$(_qval "$opus")"
-    printf 'export ANTHROPIC_DEFAULT_OPUS_MODEL_NAME=%s\n' "$(_qval "$opus_n")"
+    if [ -n "$opus_n" ] && [ "$opus_n" != "$opus" ]; then
+      printf 'export ANTHROPIC_DEFAULT_OPUS_MODEL_NAME=%s\n' "$(_qval "$opus_n")"
+    fi
     printf 'export ANTHROPIC_DEFAULT_SONNET_MODEL=%s\n' "$(_qval "$sonnet")"
-    printf 'export ANTHROPIC_DEFAULT_SONNET_MODEL_NAME=%s\n' "$(_qval "$sonnet_n")"
+    if [ -n "$sonnet_n" ] && [ "$sonnet_n" != "$sonnet" ]; then
+      printf 'export ANTHROPIC_DEFAULT_SONNET_MODEL_NAME=%s\n' "$(_qval "$sonnet_n")"
+    fi
     printf 'export ANTHROPIC_DEFAULT_HAIKU_MODEL=%s\n' "$(_qval "$haiku")"
-    printf 'export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME=%s\n' "$(_qval "$haiku_n")"
+    if [ -n "$haiku_n" ] && [ "$haiku_n" != "$haiku" ]; then
+      printf 'export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME=%s\n' "$(_qval "$haiku_n")"
+    fi
     printf '\n# 可选:子代理模型\n'
     if [ -n "$subagent" ]; then
       printf 'export CLAUDE_CODE_SUBAGENT_MODEL=%s\n' "$(_qval "$subagent")"
@@ -248,38 +249,68 @@ _write_profile() { # _write_profile <file> <tok> <url> <opus> <opus_n> <sonnet> 
   chmod 600 "$file"
 }
 
-_ui_dialog_form() { # _ui_dialog_form <title> label1 val1 label2 val2 ... -> values on stdout (one per line), exit 0=OK
-  local title="$1"; shift
-  local term_w
-  term_w="$(tput cols 2>/dev/null || echo 80)"
-  [ "$term_w" -lt 60 ] && term_w=60
-  [ "$term_w" -gt 90 ] && term_w=90
+_ui_wizard_timeline() { # _ui_wizard_timeline <current> <total> "label1" "label2" ...
+  # Draws vertical timeline of dots + labels. Current step gets ◎, completed ●, pending ○.
+  local current="$1" total="$2"; shift 2
+  local -a labels=("$@")
+  local i conn
 
-  local field_w=$(( term_w - 42 ))
-  [ "$field_w" -lt 20 ] && field_w=20
+  for ((i = 0; i < total; i++)); do
+    if [ $((i + 1)) -eq "$total" ]; then conn=" "; else conn="│"; fi
 
-  local tmpfile
-  tmpfile="$(mktemp)" || return 1
-  trap 'rm -f "$tmpfile"' RETURN
-
-  local -a args=()
-  local row=0
-  while [ $# -ge 2 ]; do
-    local label="$1" initial="$2"; shift 2
-    args+=("$label" "$row" 42 "$initial" "$row" 44 "$field_w" 0)
-    row=$((row + 1))
+    if [ "$current" -gt "$total" ] || [ $((i + 1)) -lt "$current" ]; then
+      # All-done or completed step
+      printf '  %s  %s  %s\n' "$(_cc_g '●')" "$(_cc_g "${labels[$i]}")" "$conn" >&2
+    elif [ $((i + 1)) -eq "$current" ]; then
+      printf '  %s  %s  %s\n' "$(_cc_c '◎')" "$(_cc_bc "${labels[$i]}")" "$conn" >&2
+    else
+      printf '  %s  %s  %s\n' "$(_cc_d '○')" "$(_cc_d "${labels[$i]}")" "$conn" >&2
+    fi
   done
+}
 
-  dialog --title "$title" \
-         --insecure \
-         --form "" \
-         $(( row + 6 )) "$term_w" 6 \
-         "${args[@]}" \
-         2>"$tmpfile"
+_ui_wizard_content() { # _ui_wizard_content <hint> <initial> -> stdout result
+  local hint="$1" initial="$2"
+  # 7 spaces align with timeline label position (2sp + dot + 2sp + 2sp)
+  [ -n "$hint" ] && printf '       %s\n' "$(_cc_d "$hint")" >&2
+  if [ -n "$initial" ]; then
+    printf '       %s %s\n' "$(_cc_d '当前值:')" "$(_cc_y "$(_mask_preview "$initial")")" >&2
+  fi
+  printf '       %s ' "$(_cc_d '输入新值 (回车保留):')" >&2
 
-  local rc=$?
-  [ $rc -eq 0 ] || return $rc
-  cat "$tmpfile"
+  local answer
+  read -r answer || return 1
+  if [ -z "$answer" ] && [ -n "$initial" ]; then
+    printf '%s' "$initial"
+  else
+    printf '%s' "$answer"
+  fi
+}
+
+_ui_wizard_confirm() { # _ui_wizard_confirm <label1> <val1> <label2> <val2> ...
+  printf '\n' >&2
+  printf '  %s\n' "$(_cc_bc "━━━━━━━━ 确认配置 ━━━━━━━━")" >&2
+  printf '\n' >&2
+
+  while [ $# -ge 2 ]; do
+    local label="$1" val="$2"; shift 2
+    local display
+    if [ -z "$val" ]; then
+      display="$(_cc_d '(未设置)')"
+    else
+      display="$(_cc_y "$(_mask_preview "$val")")"
+    fi
+    printf '       %s  %s: %s\n' "$(_cc_g '●')" "$(_cc_c "$label")" "$display" >&2
+  done
+  printf '\n' >&2
+  printf '       %s %s' "$(_cc_y "?")" "确认保存以上配置? [Y/n] " >&2
+
+  local ans
+  read -r ans
+  case "$ans" in
+    n|N|no|NO) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 _ui_read_form() { # _ui_read_form <title> label1 val1 label2 val2 ... -> values on stdout (one per line)
@@ -292,7 +323,6 @@ _ui_read_form() { # _ui_read_form <title> label1 val1 label2 val2 ... -> values 
   local -a values=()
   while [ $# -ge 2 ]; do
     local label="$1" initial="$2"; shift 2
-    local prompt
     if [ -n "$initial" ]; then
       printf '  %s %s  %s\n' "$(_cc_g '●')" "$(_cc_c "$label")" "$(_cc_y "$(_mask_preview "$initial")")" >&2
     else
@@ -331,72 +361,90 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
     haiku="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_HAIKU_MODEL)"
     haiku_n="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME)"
     subagent="$(_parse_env_value "$existing_file" CLAUDE_CODE_SUBAGENT_MODEL)"
+
+    # Clear _NAME when identical to _MODEL (no need to write redundant vars)
+    [ "$opus_n" = "$opus" ] && opus_n=""
+    [ "$sonnet_n" = "$sonnet" ] && sonnet_n=""
+    [ "$haiku_n" = "$haiku" ] && haiku_n=""
   else
     tok="<YOUR_TOKEN_HERE>"
     url="<https://your-gateway.example.com>"
     opus="claude-opus-4-8"
-    opus_n="claude-opus-4-8"
+    opus_n=""
     sonnet="claude-sonnet-4-6"
-    sonnet_n="claude-sonnet-4-6"
+    sonnet_n=""
     haiku="claude-haiku-4-5-20251001"
-    haiku_n="claude-haiku-4-5-20251001"
+    haiku_n=""
     subagent=""
   fi
 
-  local title
-  if [ "$mode" = "new" ]; then
-    title="新建 profile: $name"
-  else
-    title="编辑 profile: $name"
-  fi
-
-  local result rc
-  if _has_dialog; then
-    result="$(_ui_dialog_form "$title" \
-      "Anthropic Auth Token:"   "$tok" \
-      "Base URL:"               "$url" \
-      "Opus Model:"             "$opus" \
-      "Opus Model Name:"       "$opus_n" \
-      "Sonnet Model:"           "$sonnet" \
-      "Sonnet Model Name:"     "$sonnet_n" \
-      "Haiku Model:"            "$haiku" \
-      "Haiku Model Name:"      "$haiku_n" \
-      "Subagent Model:"         "$subagent" \
-    )"
-    rc=$?
-    [ $rc -eq 0 ] || return 1
-  else
-    result="$(_ui_read_form "$title" \
-      "Auth Token"   "$tok" \
-      "Base URL"     "$url" \
-      "Opus Model"   "$opus" \
-      "Opus Model Name" "$opus_n" \
-      "Sonnet Model" "$sonnet" \
-      "Sonnet Model Name" "$sonnet_n" \
-      "Haiku Model"  "$haiku" \
-      "Haiku Model Name" "$haiku_n" \
-      "Subagent Model" "$subagent" \
-    )"
-  fi
-
-  # Parse result lines into variables
-  local -a lines=()
-  while IFS= read -r line; do
-    lines+=("$line")
-  done <<< "$result"
-
-  tok="${lines[0]}"
-  url="${lines[1]}"
-  opus="${lines[2]}"
-  opus_n="${lines[3]}"
-  sonnet="${lines[4]}"
-  sonnet_n="${lines[5]}"
-  haiku="${lines[6]}"
-  haiku_n="${lines[7]}"
-  subagent="${lines[8]}"
-
-  # Resolve path
   local pf; pf="$(_profile_path "$name")" || return $?
+
+  local title_text
+  if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
+  else title_text="编辑 profile: $name"; fi
+  printf '\n' >&2
+  printf '  %s\n' "$(_cc_bc "━━━ $title_text ━━━")" >&2
+  printf '\n' >&2
+
+  # Step-based wizard: 4 steps
+  local step_total=4
+  local -a step_labels=(
+    "身份认证"
+    "网关地址"
+    "模型映射"
+    "子代理模型"
+  )
+  local result_tok result_url result_opus result_opus_n result_sonnet result_sonnet_n result_haiku result_haiku_n result_subagent
+
+  # Step 1: Auth
+  _ui_wizard_timeline 1 "$step_total" "${step_labels[@]}"
+  result_tok="$(_ui_wizard_content "填入你的 Anthropic API Token 或代理网关 Token" "$tok")" || return 1
+
+  # Step 2: Base URL
+  printf '\n' >&2
+  _ui_wizard_timeline 2 "$step_total" "${step_labels[@]}"
+  result_url="$(_ui_wizard_content "API 代理的基础 URL" "$url")" || return 1
+
+  # Step 3: Model mapping
+  printf '\n' >&2
+  _ui_wizard_timeline 3 "$step_total" "${step_labels[@]}"
+  result_opus="$(_ui_wizard_content "Opus 模型 ID" "$opus")" || return 1
+  result_opus_n="$(_ui_wizard_content "Opus 显示名称 (可选, 留空同模型 ID)" "$opus_n")" || return 1
+  result_sonnet="$(_ui_wizard_content "Sonnet 模型 ID" "$sonnet")" || return 1
+  result_sonnet_n="$(_ui_wizard_content "Sonnet 显示名称 (可选, 留空同模型 ID)" "$sonnet_n")" || return 1
+  result_haiku="$(_ui_wizard_content "Haiku 模型 ID" "$haiku")" || return 1
+  result_haiku_n="$(_ui_wizard_content "Haiku 显示名称 (可选, 留空同模型 ID)" "$haiku_n")" || return 1
+
+  # Step 4: Subagent
+  printf '\n' >&2
+  _ui_wizard_timeline 4 "$step_total" "${step_labels[@]}"
+  result_subagent="$(_ui_wizard_content "用于 Agent SDK 调用的模型, 留空使用默认" "$subagent")" || return 1
+
+  # Confirmation
+  _ui_wizard_confirm \
+    "Auth Token" "$result_tok" \
+    "Base URL" "$result_url" \
+    "Opus Model" "$result_opus" \
+    "Opus Name" "$result_opus_n" \
+    "Sonnet Model" "$result_sonnet" \
+    "Sonnet Name" "$result_sonnet_n" \
+    "Haiku Model" "$result_haiku" \
+    "Haiku Name" "$result_haiku_n" \
+    "Subagent" "$result_subagent" \
+    || return 1
+
+  tok="$result_tok"
+  url="$result_url"
+  opus="$result_opus"
+  opus_n="$result_opus_n"
+  sonnet="$result_sonnet"
+  sonnet_n="$result_sonnet_n"
+  haiku="$result_haiku"
+  haiku_n="$result_haiku_n"
+  subagent="$result_subagent"
+
+  # Resolve path (already done above, reuse $pf)
 
   # Extract existing custom vars (non-standard) before overwriting
   local -a existing_keys=()
@@ -427,6 +475,13 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
 
   # Write profile with standard fields + updated custom vars
   _write_profile "$pf" "$tok" "$url" "$opus" "$opus_n" "$sonnet" "$sonnet_n" "$haiku" "$haiku_n" "$subagent" "${_CUSTOM_KEYS[@]}" "${_CUSTOM_VALS[@]}"
+
+  # Final: all complete
+  printf '\n' >&2
+  _ui_wizard_timeline 9 "$step_total" "${step_labels[@]}"
+  printf '\n' >&2
+  printf '  %s\n' "$(_cc_g "✓ profile $name 已保存")" >&2
+  printf '\n' >&2
 }
 
 # ─── Environment variable reference and custom var addition ──────────
@@ -463,12 +518,8 @@ _add_custom_env_vars() { # _add_custom_env_vars <profile_file> <keys_array_name>
   local -a ekeys=("${!keys_ref}")
   local -a evals=("${!vals_ref}")
 
-  # _add_custom_env_vars_read/dialog sets _CUSTOM_KEYS/_CUSTOM_VALS globals
-  if _has_dialog && [ -n "$_ENV_REF" ]; then
-    _add_custom_env_vars_dialog "$pf" ekeys evals
-  else
-    _add_custom_env_vars_read "$pf" ekeys evals
-  fi
+  # _add_custom_env_vars_read sets _CUSTOM_KEYS/_CUSTOM_VALS globals
+  _add_custom_env_vars_read "$pf" ekeys evals
   # Don't override — _read/_dialog already set _CUSTOM_KEYS/_CUSTOM_VALS
 }
 
@@ -598,165 +649,6 @@ _add_custom_env_vars_read() { # _add_custom_env_vars_read <profile_file> keys_re
   _CUSTOM_VALS=("${evals[@]}")
 }
 
-_add_custom_env_vars_dialog() { # _add_custom_env_vars_dialog <profile_file> keys_ref vals_ref
-  local pf="$1"
-  local keys_ref="$2[@]" vals_ref="$3[@]"
-  local -a ekeys=("${!keys_ref}")
-  local -a evals=("${!vals_ref}")
-
-  # Phase 1: Review & edit existing custom vars
-  local i=0
-  while [ "$i" -lt "${#ekeys[@]}" ]; do
-    local key="${ekeys[$i]}"
-    local val="${evals[$i]}"
-    local tmpfile
-    tmpfile="$(mktemp)" || break
-    dialog --title "编辑自定义变量 [$i/$(( ${#ekeys[@]} - 1 ))]" \
-           --form "变量: $key" \
-           6 70 4 \
-           "KEY:" 0 2 "$key" 0 8 0 0 \
-           "VAL:" 1 2 "$val" 1 8 58 0 \
-           2>"$tmpfile"
-    local rc=$?
-    if [ $rc -ne 0 ]; then
-      rm -f "$tmpfile"
-      break  # User cancelled, keep current
-    fi
-    # Parse: line 0 = key (read-only), line 1 = new value
-    local result
-    result="$(cat "$tmpfile")"
-    rm -f "$tmpfile"
-    local -a lines=()
-    while IFS= read -r line; do
-      lines+=("$line")
-    done <<< "$result"
-    local newval="${lines[1]:-}"
-
-    if [ -z "$newval" ]; then
-      # Empty in dialog = delete
-      printf '%s\n' "$(_cc_r '✖ 已删除')" "$key" >&2
-      unset 'ekeys[$i]' 'evals[$i]'
-    elif [ "$newval" = "$val" ]; then
-      printf '%s\n' "$(_cc_d '· 保留')" "$key" >&2
-    else
-      evals[$i]="$newval"
-      printf '%s\n' "$(_cc_g '✓ 已更新')" "$key" >&2
-    fi
-    i=$((i + 1))
-  done
-
-  # Compact arrays
-  local -a compact_keys=() compact_vals=()
-  for i in "${!ekeys[@]}"; do
-    [ -n "${ekeys[$i]:-}" ] && { compact_keys+=("${ekeys[$i]}"); compact_vals+=("${evals[$i]}"); }
-  done
-  ekeys=("${compact_keys[@]}")
-  evals=("${compact_vals[@]}")
-
-  # Phase 2: Add new custom vars
-  while true; do
-    local term_w
-    term_w="$(tput cols 2>/dev/null || echo 80)"
-    [ "$term_w" -lt 60 ] && term_w=60
-    [ "$term_w" -gt 90 ] && term_w=90
-
-    # Search query
-    local tmpfile
-    tmpfile="$(mktemp)" || break
-    trap 'rm -f "$tmpfile"' RETURN
-
-    dialog --title "添加自定义环境变量" \
-           --form "输入关键词搜索, 或留空显示全部" \
-           7 "$term_w" 4 \
-           "搜索:" 0 42 "" 0 44 "$((term_w - 48))" 0 \
-           2>"$tmpfile"
-
-    local rc=$?
-    if [ $rc -ne 0 ]; then
-      rm -f "$tmpfile"
-      break
-    fi
-
-    local query
-    query="$(cat "$tmpfile")"
-    rm -f "$tmpfile"
-
-    # Show results and get key/val
-    local results=""
-    if [ -n "$_ENV_REF" ]; then
-      results="$(_search_env_ref "$query")"
-    fi
-
-    tmpfile="$(mktemp)" || break
-    local -a args=()
-    local row=0
-
-    if [ -n "$results" ]; then
-      local count=0
-      while IFS='|' read -r key cat desc; do
-        args+=("$key ($desc)" "$row" 0 "(只读)" "$row" 1 0 0)
-        row=$((row + 1))
-        count=$((count + 1))
-        [ "$count" -ge 8 ] && break
-      done <<< "$results"
-    fi
-
-    local key_row=$row
-    args+=("变量名(留空结束):" "$row" 0 "" "$row" 17 "$((term_w - 18))" 0)
-    row=$((row + 1))
-
-    local val_row=$row
-    args+=("值:" "$row" 0 "" "$row" 11 "$((term_w - 14))" 0)
-
-    local h=$(( row + 8 ))
-    dialog --title "添加自定义环境变量" \
-           --insecure \
-           --form "" \
-           "$h" "$term_w" 4 \
-           "${args[@]}" \
-           2>"$tmpfile"
-
-    rc=$?
-    if [ $rc -ne 0 ]; then
-      rm -f "$tmpfile"
-      break
-    fi
-
-    local result
-    result="$(cat "$tmpfile")"
-    rm -f "$tmpfile"
-
-    local -a lines=()
-    while IFS= read -r line; do
-      lines+=("$line")
-    done <<< "$result"
-
-    local key="${lines[$key_row]:-}"
-    local val="${lines[$val_row]:-}"
-
-    [ -n "$key" ] || break
-    [ -n "$val" ] || continue
-
-    if ! printf '%s' "$key" | grep -qE '^[A-Z][A-Z0-9_]*$'; then
-      dialog --title "错误" --msgbox "无效的变量名: $key" 5 40
-      continue
-    fi
-
-    # Check if already exists
-    local found=0
-    for ek in "${ekeys[@]}"; do
-      [ "$ek" = "$key" ] && { found=1; break; }
-    done
-    [ "$found" -eq 1 ] && { dialog --title "跳过" --msgbox "变量 $key 已存在" 5 30; continue; }
-
-    ekeys+=("$key")
-    evals+=("$val")
-    dialog --title "成功" --msgbox "已添加 $key" 5 30
-  done
-
-  _CUSTOM_KEYS=("${ekeys[@]}")
-  _CUSTOM_VALS=("${evals[@]}")
-}
 
 cmd_list() {
   _ensure_skeleton
