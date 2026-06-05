@@ -122,6 +122,7 @@ _clone_repo() {
 #   pkg_name  — 对应包管理器的包名
 # 依次尝试每个 pkg_mgr:pkg_name,该包管理器不存在则跳过
 _OPT_DEPS=(
+  "gum|brew:gum|apt:charm-gum|yum:gum|dnf:gum|pacman:gum"
   "jq|brew:jq|apt:jq|yum:jq|dnf:jq|pacman:jq"
 )
 
