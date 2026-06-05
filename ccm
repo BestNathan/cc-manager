@@ -64,12 +64,13 @@ export ANTHROPIC_AUTH_TOKEN="<YOUR_TOKEN_HERE>"
 export ANTHROPIC_BASE_URL="<https://your-gateway.example.com>"
 
 # 模型映射(按需修改)
+# _NAME 变量仅在与 _MODEL 值不同时才需要设置(用于自定义显示名称)
 export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4-8"
-export ANTHROPIC_DEFAULT_OPUS_MODEL_NAME="claude-opus-4-8"
+# export ANTHROPIC_DEFAULT_OPUS_MODEL_NAME="claude-opus-4-8"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4-6"
-export ANTHROPIC_DEFAULT_SONNET_MODEL_NAME="claude-sonnet-4-6"
+# export ANTHROPIC_DEFAULT_SONNET_MODEL_NAME="claude-sonnet-4-6"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5-20251001"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="claude-haiku-4-5-20251001"
+# export ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME="claude-haiku-4-5-20251001"
 
 # 可选:子代理模型
 # export CLAUDE_CODE_SUBAGENT_MODEL="<model-id>"
@@ -249,22 +250,34 @@ _write_profile() { # _write_profile <file> <tok> <url> <opus> <opus_n> <sonnet> 
   chmod 600 "$file"
 }
 
-_ui_wizard_timeline() { # _ui_wizard_timeline <current> <total> "label1" "label2" ...
-  # Draws vertical timeline of dots + labels. Current step gets ◎, completed ●, pending ○.
+_ui_wizard_timeline() { # _ui_wizard_timeline <current> <total> "label1" "label2" ... [<summaries>...]
+  # current: 当前步骤号(1-based), total: 总步数
+  # labels: total 个标签
+  # summaries: 额外参数，每个 completed 步骤的摘要文本（空表示无摘要）
   local current="$1" total="$2"; shift 2
-  local -a labels=("$@")
-  local i conn
+  local -a labels=()
+  while [ "$#" -gt 0 ] && [ ${#labels[@]} -lt "$total" ]; do
+    labels+=("$1"); shift
+  done
+  # Remaining args are summaries (one per completed step)
+  local -a summaries=("$@")
 
+  local i conn
   for ((i = 0; i < total; i++)); do
+    # Don't show future steps beyond current
+    if [ $((i + 1)) -gt "$current" ]; then break; fi
+
     if [ $((i + 1)) -eq "$total" ]; then conn=" "; else conn="│"; fi
 
-    if [ "$current" -gt "$total" ] || [ $((i + 1)) -lt "$current" ]; then
-      # All-done or completed step
-      printf '  %s  %s  %s\n' "$(_cc_g '●')" "$(_cc_g "${labels[$i]}")" "$conn" >&2
+    local summary=""
+    if [ $((i + 1)) -lt "$current" ] && [ $i -lt ${#summaries[@]} ]; then
+      summary="  ${summaries[$i]}"
+    fi
+
+    if [ $((i + 1)) -lt "$current" ]; then
+      printf '  %s  %s  %s%s\n' "$(_cc_g '●')" "$(_cc_g "${labels[$i]}")" "$conn" "$(_cc_d "$summary")" >&2
     elif [ $((i + 1)) -eq "$current" ]; then
       printf '  %s  %s  %s\n' "$(_cc_c '◎')" "$(_cc_bc "${labels[$i]}")" "$conn" >&2
-    else
-      printf '  %s  %s  %s\n' "$(_cc_d '○')" "$(_cc_d "${labels[$i]}")" "$conn" >&2
     fi
   done
 }
@@ -313,42 +326,10 @@ _ui_wizard_confirm() { # _ui_wizard_confirm <label1> <val1> <label2> <val2> ...
   esac
 }
 
-_ui_read_form() { # _ui_read_form <title> label1 val1 label2 val2 ... -> values on stdout (one per line)
-  local title="$1"; shift
-
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━ $title ━")" >&2
-  printf '\n' >&2
-
-  local -a values=()
-  while [ $# -ge 2 ]; do
-    local label="$1" initial="$2"; shift 2
-    if [ -n "$initial" ]; then
-      printf '  %s %s  %s\n' "$(_cc_g '●')" "$(_cc_c "$label")" "$(_cc_y "$(_mask_preview "$initial")")" >&2
-    else
-      printf '  %s %s\n' "$(_cc_d '○')" "$(_cc_d "$label")" >&2
-    fi
-    local answer
-    printf '     ' >&2
-    read -r answer || break
-    # If empty and there was an initial value, keep the initial
-    if [ -z "$answer" ] && [ -n "$initial" ]; then
-      answer="$initial"
-    fi
-    values+=("$answer")
-  done
-
-  # Output values one per line (to stdout, for parsing)
-  local v
-  for v in "${values[@]}"; do
-    printf '%s\n' "$v"
-  done
-}
-
 _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [existing_file]
   local mode="$1" name="$2" existing_file="${3:-}"
 
-  # Determine initial values
+  # ── Load initial values ─────────────────────────────────────────
   local tok url opus opus_n sonnet sonnet_n haiku haiku_n subagent
 
   if [ -n "$existing_file" ] && [ -f "$existing_file" ]; then
@@ -361,8 +342,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
     haiku="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_HAIKU_MODEL)"
     haiku_n="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME)"
     subagent="$(_parse_env_value "$existing_file" CLAUDE_CODE_SUBAGENT_MODEL)"
-
-    # Clear _NAME when identical to _MODEL (no need to write redundant vars)
+    # Clear redundant _NAME vars
     [ "$opus_n" = "$opus" ] && opus_n=""
     [ "$sonnet_n" = "$sonnet" ] && sonnet_n=""
     [ "$haiku_n" = "$haiku" ] && haiku_n=""
@@ -380,6 +360,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
 
   local pf; pf="$(_profile_path "$name")" || return $?
 
+  # ── Title ────────────────────────────────────────────────────────
   local title_text
   if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
   else title_text="编辑 profile: $name"; fi
@@ -387,77 +368,50 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   printf '  %s\n' "$(_cc_bc "━━━ $title_text ━━━")" >&2
   printf '\n' >&2
 
-  # Step-based wizard: 4 steps
-  local step_total=4
-  local -a step_labels=(
-    "身份认证"
-    "网关地址"
-    "模型映射"
-    "子代理模型"
-  )
-  local result_tok result_url result_opus result_opus_n result_sonnet result_sonnet_n result_haiku result_haiku_n result_subagent
+  # ── 5-step wizard ───────────────────────────────────────────────
+  local step_total=5
+  local -a step_labels=("身份认证" "模型映射" "子代理" "自定义变量" "确认")
 
-  # Step 1: Auth
+  local result_tok result_url result_opus result_sonnet result_haiku result_subagent
+
+  # Step 1: Auth (Token + URL merged)
+  printf '\n' >&2
   _ui_wizard_timeline 1 "$step_total" "${step_labels[@]}"
-  result_tok="$(_ui_wizard_content "填入你的 Anthropic API Token 或代理网关 Token" "$tok")" || return 1
-
-  # Step 2: Base URL
+  result_tok="$(_ui_wizard_content "API Token" "$tok")" || return 1
   printf '\n' >&2
-  _ui_wizard_timeline 2 "$step_total" "${step_labels[@]}"
-  result_url="$(_ui_wizard_content "API 代理的基础 URL" "$url")" || return 1
+  result_url="$(_ui_wizard_content "Base URL" "$url")" || return 1
 
-  # Step 3: Model mapping
+  # Build auth summary for completed step display
+  local auth_summary="Token: $(_mask_preview "$result_tok")  URL: $(_mask_preview "$result_url")"
+
+  # Step 2: Models (3 main models only, _NAME hidden)
   printf '\n' >&2
-  _ui_wizard_timeline 3 "$step_total" "${step_labels[@]}"
+  _ui_wizard_timeline 2 "$step_total" "${step_labels[@]}" "$auth_summary"
   result_opus="$(_ui_wizard_content "Opus 模型 ID" "$opus")" || return 1
-  result_opus_n="$(_ui_wizard_content "Opus 显示名称 (可选, 留空同模型 ID)" "$opus_n")" || return 1
   result_sonnet="$(_ui_wizard_content "Sonnet 模型 ID" "$sonnet")" || return 1
-  result_sonnet_n="$(_ui_wizard_content "Sonnet 显示名称 (可选, 留空同模型 ID)" "$sonnet_n")" || return 1
   result_haiku="$(_ui_wizard_content "Haiku 模型 ID" "$haiku")" || return 1
-  result_haiku_n="$(_ui_wizard_content "Haiku 显示名称 (可选, 留空同模型 ID)" "$haiku_n")" || return 1
 
-  # Step 4: Subagent
+  local model_summary="Opus: $(_mask_preview "$result_opus")  Sonnet: $(_mask_preview "$result_sonnet")  Haiku: $(_mask_preview "$result_haiku")"
+
+  # Step 3: Subagent
   printf '\n' >&2
-  _ui_wizard_timeline 4 "$step_total" "${step_labels[@]}"
-  result_subagent="$(_ui_wizard_content "用于 Agent SDK 调用的模型, 留空使用默认" "$subagent")" || return 1
+  _ui_wizard_timeline 3 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary"
+  result_subagent="$(_ui_wizard_content "子代理模型 (留空使用默认)" "$subagent")" || return 1
 
-  # Confirmation
-  _ui_wizard_confirm \
-    "Auth Token" "$result_tok" \
-    "Base URL" "$result_url" \
-    "Opus Model" "$result_opus" \
-    "Opus Name" "$result_opus_n" \
-    "Sonnet Model" "$result_sonnet" \
-    "Sonnet Name" "$result_sonnet_n" \
-    "Haiku Model" "$result_haiku" \
-    "Haiku Name" "$result_haiku_n" \
-    "Subagent" "$result_subagent" \
-    || return 1
+  local subagent_summary
+  if [ -n "$result_subagent" ]; then subagent_summary="$(_mask_preview "$result_subagent")"
+  else subagent_summary="(未设置)"; fi
 
-  tok="$result_tok"
-  url="$result_url"
-  opus="$result_opus"
-  opus_n="$result_opus_n"
-  sonnet="$result_sonnet"
-  sonnet_n="$result_sonnet_n"
-  haiku="$result_haiku"
-  haiku_n="$result_haiku_n"
-  subagent="$result_subagent"
-
-  # Resolve path (already done above, reuse $pf)
-
-  # Extract existing custom vars (non-standard) before overwriting
+  # Step 4: Custom env vars (integrated into timeline)
+  # Extract existing custom vars
   local -a existing_keys=()
   local -a existing_vals=()
   if [ -n "$existing_file" ] && [ -f "$existing_file" ]; then
-    local -A existing_map
     while IFS= read -r line; do
-      # Match: export KEY=VALUE or export KEY='VALUE' or export KEY="VALUE"
       local ekey eval
       ekey="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
       [ -n "$ekey" ] || continue
       eval="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*${ekey}=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
-      # Skip standard keys
       case "$ekey" in
         ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|\
         ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL_NAME|\
@@ -470,19 +424,47 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
     done < "$existing_file"
   fi
 
-  # Let user edit/add custom vars; returns updated keys+vals in _CUSTOM_KEYS/VALS
+  printf '\n' >&2
+  _ui_wizard_timeline 4 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary"
+
   _add_custom_env_vars "$pf" existing_keys existing_vals
 
-  # Write profile with standard fields + updated custom vars
-  _write_profile "$pf" "$tok" "$url" "$opus" "$opus_n" "$sonnet" "$sonnet_n" "$haiku" "$haiku_n" "$subagent" "${_CUSTOM_KEYS[@]}" "${_CUSTOM_VALS[@]}"
+  # Build custom vars summary
+  local custom_summary="(无)"
+  if [ "${#_CUSTOM_KEYS[@]}" -gt 0 ]; then
+    custom_summary=""
+    local i
+    for i in "${!_CUSTOM_KEYS[@]}"; do
+      [ -n "$custom_summary" ] && custom_summary+=" "
+      custom_summary+="${_CUSTOM_KEYS[$i]}=$(_mask_preview "${_CUSTOM_VALS[$i]}")"
+    done
+  fi
 
-  # Final: all complete
+  # Step 5: Confirmation
   printf '\n' >&2
-  _ui_wizard_timeline 9 "$step_total" "${step_labels[@]}"
+  _ui_wizard_timeline 5 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
+
+  _ui_wizard_confirm \
+    "Auth Token" "$result_tok" \
+    "Base URL" "$result_url" \
+    "Opus Model" "$result_opus" \
+    "Sonnet Model" "$result_sonnet" \
+    "Haiku Model" "$result_haiku" \
+    "Subagent" "$result_subagent" \
+    || return 1
+
+  # ── Write profile ───────────────────────────────────────────────
+  _write_profile "$pf" "$result_tok" "$result_url" \
+    "$result_opus" "" "$result_sonnet" "" "$result_haiku" "" "$result_subagent"
+
+  # ── Complete ─────────────────────────────────────────────────────
+  printf '\n' >&2
+  _ui_wizard_timeline $((step_total + 1)) "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
   printf '\n' >&2
   printf '  %s\n' "$(_cc_g "✓ profile $name 已保存")" >&2
   printf '\n' >&2
 }
+
 
 # ─── Environment variable reference and custom var addition ──────────
 
@@ -602,10 +584,12 @@ _add_custom_env_vars_read() { # _add_custom_env_vars_read <profile_file> keys_re
         fi
       else
         printf '\n  %s (前 50 项)\n' "$(_cc_d '全部环境变量')" >&2
+        local total_count
+        total_count="$(_search_env_ref "" | wc -l | tr -d ' ')"
         _search_env_ref "" | head -50 | while IFS='|' read -r key cat desc; do
           printf '    %s  %s\n' "$(_cc_c "$key")" "$(_cc_d "$desc")" >&2
         done
-        printf '  %s\n\n' "$(_cc_d "... 共 $((_search_env_ref "" | wc -l)) 项, 输入关键词可缩小范围")" >&2
+        printf '  %s\n\n' "$(_cc_d "... 共 $total_count 项, 输入关键词可缩小范围")" >&2
       fi
     fi
 
