@@ -255,11 +255,7 @@ _ui_clear() { # _ui_clear — clear screen + cursor home (ANSI escape)
 }
 
 _has_gum() { # _has_gum -> 0 if gum is available, not disabled, and TTY exists
-  local ok=1
-  if [ -n "${CCM_NO_GUM:-}" ]; then echo "[gum] disabled (CCM_NO_GUM set)" >&2; ok=0; fi
-  if [ "$ok" -eq 1 ] && ! command -v gum >/dev/null 2>&1; then echo "[gum] command not found in PATH=$PATH" >&2; ok=0; fi
-  if [ "$ok" -eq 1 ] && ! [ -t 0 ]; then echo "[gum] no TTY on stdin" >&2; ok=0; fi
-  [ "$ok" -eq 1 ]
+  [ -z "${CCM_NO_GUM:-}" ] && command -v gum >/dev/null 2>&1 && [ -t 0 ]
 }
 
 _ui_gum_input() { # _ui_gum_input <label> <hint> <initial> <password:0|1> -> stdout result
