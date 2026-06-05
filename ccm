@@ -255,7 +255,11 @@ _ui_clear() { # _ui_clear — clear screen + cursor home (ANSI escape)
 }
 
 _has_gum() { # _has_gum -> 0 if gum is available, not disabled, and TTY exists
-  [ -z "${CCM_NO_GUM:-}" ] && command -v gum >/dev/null 2>&1 && [ -t 0 ]
+  local ok=1
+  if [ -n "${CCM_NO_GUM:-}" ]; then echo "[gum] disabled (CCM_NO_GUM set)" >&2; ok=0; fi
+  if [ "$ok" -eq 1 ] && ! command -v gum >/dev/null 2>&1; then echo "[gum] command not found in PATH=$PATH" >&2; ok=0; fi
+  if [ "$ok" -eq 1 ] && ! [ -t 0 ]; then echo "[gum] no TTY on stdin" >&2; ok=0; fi
+  [ "$ok" -eq 1 ]
 }
 
 _ui_gum_input() { # _ui_gum_input <label> <hint> <initial> <password:0|1> -> stdout result
@@ -313,14 +317,21 @@ _ui_gum_wizard() { # _ui_gum_wizard <mode> <name> <existing_file> <tok> <url> <o
 
   local pf; pf="$(_profile_path "$name")" || return $?
 
+  # ── Title ────────────────────────────────────────────────────────
+  local title_text
+  if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
+  else title_text="编辑 profile: $name"; fi
+  printf '\n' >&2
+  printf '  %s %s\n' "$(_cc_bc "━━━ $title_text ━━━")" "$(_cc_g '(gum)')" >&2
+  printf '\n' >&2
+
   # ── 5-step gum wizard ───────────────────────────────────────────
   local step_total=5
   local -a step_labels=("身份认证" "模型映射" "子代理" "自定义变量" "确认")
 
   local result_tok result_url result_opus result_sonnet result_haiku result_subagent
 
-  # Step 1: Auth (Token + URL)
-  _ui_clear
+  # Step 1: Auth (Token + URL) — no clear, keep title visible
   _ui_gum_timeline 1 "$step_total" "${step_labels[@]}"
   result_tok="$(_ui_gum_input "API Token" "sk-ant-..." "$tok" 1)" || return 1
   result_url="$(_ui_gum_input "Base URL" "https://api.example.com/v1" "$url" 0)" || return 1
@@ -526,7 +537,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
   else title_text="编辑 profile: $name"; fi
   printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━ $title_text ━━━")" >&2
+  printf '  %s %s\n' "$(_cc_bc "━━━ $title_text ━━━")" "$(_cc_d '(shell)')" >&2
   printf '\n' >&2
 
   # ── 5-step wizard ───────────────────────────────────────────────
