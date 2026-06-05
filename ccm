@@ -258,16 +258,27 @@ _has_gum() { # _has_gum -> 0 if gum is available, not disabled, and TTY exists
   [ -z "${CCM_NO_GUM:-}" ] && command -v gum >/dev/null 2>&1 && [ -t 0 ]
 }
 
-_ui_gum_input() { # _ui_gum_input <label> <hint> <initial> <password:0|1> -> stdout result
+_ui_gum_input() { # _ui_gum_input <label> <hint> <initial> <password:0|1> -> writes to _GUM_RESULT
   local label="$1" hint="$2" initial="$3" password="${4:-0}"
+  _GUM_RESULT=""
 
-  # Build gum command — use gum's own styled rendering for the header
+  # Build gum command
   local -a cmd=(gum input --width 60 --header "$label" --header.foreground "6")
   [ "$password" -eq 1 ] && cmd+=(--password)
   [ -n "$initial" ] && cmd+=(--value "$initial")
   cmd+=(--placeholder "$hint")
 
-  "${cmd[@]}" 2>/dev/null || return 1
+  # Use temp file instead of command substitution to avoid subshell TTY issues
+  local tmpfile
+  tmpfile="$(mktemp)" || return 1
+  if "${cmd[@]}" < /dev/tty > "$tmpfile" 2>&1; then
+    _GUM_RESULT="$(cat "$tmpfile")"
+    rm -f "$tmpfile"
+    return 0
+  else
+    rm -f "$tmpfile"
+    return 1
+  fi
 }
 
 _ui_gum_confirm() { # _ui_gum_confirm <label1> <val1> <label2> <val2> ... -> 0 if confirmed
@@ -289,7 +300,7 @@ _ui_gum_confirm() { # _ui_gum_confirm <label1> <val1> <label2> <val2> ... -> 0 i
   done
 
   printf '\n' >&2
-  gum confirm "确认保存以上配置?" 2>/dev/null || return 1
+  gum confirm "确认保存以上配置?" || return 1
 }
 
 _ui_gum_timeline() { # _ui_gum_timeline — alias to _ui_wizard_timeline
@@ -319,24 +330,30 @@ _ui_gum_wizard() { # _ui_gum_wizard <mode> <name> <existing_file> <tok> <url> <o
 
   # Step 1: Auth (Token + URL) — no clear, keep title visible
   _ui_gum_timeline 1 "$step_total" "${step_labels[@]}"
-  result_tok="$(_ui_gum_input "API Token" "sk-ant-..." "$tok" 1)" || return 1
-  result_url="$(_ui_gum_input "Base URL" "https://api.example.com/v1" "$url" 0)" || return 1
+  _ui_gum_input "API Token" "sk-ant-..." "$tok" 1 || return 1
+  result_tok="$_GUM_RESULT"
+  _ui_gum_input "Base URL" "https://api.example.com/v1" "$url" 0 || return 1
+  result_url="$_GUM_RESULT"
 
   local auth_summary="Token: $(_mask_preview "$result_tok")  URL: $(_mask_preview "$result_url")"
 
   # Step 2: Models
   _ui_clear
   _ui_gum_timeline 2 "$step_total" "${step_labels[@]}" "$auth_summary"
-  result_opus="$(_ui_gum_input "Opus 模型 ID" "claude-opus-4-8" "$opus" 0)" || return 1
-  result_sonnet="$(_ui_gum_input "Sonnet 模型 ID" "claude-sonnet-4-6" "$sonnet" 0)" || return 1
-  result_haiku="$(_ui_gum_input "Haiku 模型 ID" "claude-haiku-4-5-20251001" "$haiku" 0)" || return 1
+  _ui_gum_input "Opus 模型 ID" "claude-opus-4-8" "$opus" 0 || return 1
+  result_opus="$_GUM_RESULT"
+  _ui_gum_input "Sonnet 模型 ID" "claude-sonnet-4-6" "$sonnet" 0 || return 1
+  result_sonnet="$_GUM_RESULT"
+  _ui_gum_input "Haiku 模型 ID" "claude-haiku-4-5-20251001" "$haiku" 0 || return 1
+  result_haiku="$_GUM_RESULT"
 
   local model_summary="Opus: $(_mask_preview "$result_opus")  Sonnet: $(_mask_preview "$result_sonnet")  Haiku: $(_mask_preview "$result_haiku")"
 
   # Step 3: Subagent
   _ui_clear
   _ui_gum_timeline 3 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary"
-  result_subagent="$(_ui_gum_input "子代理模型 (可选)" "留空使用默认" "$subagent" 0)" || return 1
+  _ui_gum_input "子代理模型 (可选)" "留空使用默认" "$subagent" 0 || return 1
+  result_subagent="$_GUM_RESULT"
 
   local subagent_summary
   if [ -n "$result_subagent" ]; then subagent_summary="$(_mask_preview "$result_subagent")"
