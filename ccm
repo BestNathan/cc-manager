@@ -254,30 +254,45 @@ _ui_clear() { # _ui_clear — clear screen + cursor home (ANSI escape)
   printf '\033[2J\033[H' >&2
 }
 
-_has_gum() { # _has_gum -> 0 if gum is available, not disabled, and TTY exists
-  [ -z "${CCM_NO_GUM:-}" ] && command -v gum >/dev/null 2>&1 && [ -t 0 ]
+_has_gum() { # _has_gum -> 0 if gum input actually works (needs /dev/tty)
+  [ -z "${CCM_NO_GUM:-}" ] && command -v gum >/dev/null 2>&1 && \
+    gum input --timeout 50ms --width 1 < /dev/tty >/dev/null 2>&1
 }
 
 _ui_gum_input() { # _ui_gum_input <label> <hint> <initial> <password:0|1> -> writes to _GUM_RESULT
+  # gum input requires /dev/tty. Fall back to shell read if unavailable.
   local label="$1" hint="$2" initial="$3" password="${4:-0}"
-  _GUM_RESULT=""
 
-  # Build gum command
-  local -a cmd=(gum input --width 60 --header "$label" --header.foreground "6")
+  # Try gum first
+  local -a cmd=(gum input --header "$label" --header.foreground "6")
   [ "$password" -eq 1 ] && cmd+=(--password)
   [ -n "$initial" ] && cmd+=(--value "$initial")
   cmd+=(--placeholder "$hint")
 
-  # Use temp file instead of command substitution to avoid subshell TTY issues
   local tmpfile
   tmpfile="$(mktemp)" || return 1
-  if "${cmd[@]}" < /dev/tty > "$tmpfile" 2>&1; then
+  if "${cmd[@]}" < /dev/tty > "$tmpfile" 2>/dev/null; then
     _GUM_RESULT="$(cat "$tmpfile")"
     rm -f "$tmpfile"
     return 0
+  fi
+  rm -f "$tmpfile"
+
+  # Fallback: shell read (gum unavailable or /dev/tty missing)
+  printf '\n' >&2
+  printf '  %s\n' "$(_cc_bc "━━━ $label ━━━")" >&2
+  [ -n "$hint" ] && printf '  %s\n' "$(_cc_d "$hint")" >&2
+  printf '\n' >&2
+  if [ -n "$initial" ]; then
+    printf '  %s %s\n' "$(_cc_d '当前值:')" "$(_cc_y "$(_mask_preview "$initial")")" >&2
+  fi
+  printf '  %s ' "$(_cc_d '输入新值 (回车保留):')" >&2
+  local answer
+  read -r answer || return 1
+  if [ -z "$answer" ] && [ -n "$initial" ]; then
+    _GUM_RESULT="$initial"
   else
-    rm -f "$tmpfile"
-    return 1
+    _GUM_RESULT="$answer"
   fi
 }
 
@@ -300,7 +315,8 @@ _ui_gum_confirm() { # _ui_gum_confirm <label1> <val1> <label2> <val2> ... -> 0 i
   done
 
   printf '\n' >&2
-  gum confirm "确认保存以上配置?" || return 1
+  gum confirm "确认保存以上配置?" < /dev/tty >/dev/null 2>&1 || \
+    { printf '  确认保存? [Y/n] ' >&2; local a; read -r a; case "$a" in n|N|no|NO) return 1 ;; esac; }
 }
 
 _ui_gum_timeline() { # _ui_gum_timeline — alias to _ui_wizard_timeline
@@ -319,7 +335,7 @@ _ui_gum_wizard() { # _ui_gum_wizard <mode> <name> <existing_file> <tok> <url> <o
   if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
   else title_text="编辑 profile: $name"; fi
   printf '\n' >&2
-  printf '  %s %s\n' "$(_cc_bc "━━━ $title_text ━━━")" "$(_cc_g '(gum)')" >&2
+  printf '  %s\n' "$(_cc_bc "━━━ $title_text ━━━")" >&2
   printf '\n' >&2
 
   # ── 5-step gum wizard ───────────────────────────────────────────
@@ -540,7 +556,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
   else title_text="编辑 profile: $name"; fi
   printf '\n' >&2
-  printf '  %s %s\n' "$(_cc_bc "━━━ $title_text ━━━")" "$(_cc_d '(shell)')" >&2
+  printf '  %s\n' "$(_cc_bc "━━━ $title_text ━━━")" >&2
   printf '\n' >&2
 
   # ── 5-step wizard ───────────────────────────────────────────────
