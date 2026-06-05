@@ -250,6 +250,10 @@ _write_profile() { # _write_profile <file> <tok> <url> <opus> <opus_n> <sonnet> 
   chmod 600 "$file"
 }
 
+_ui_clear() { # _ui_clear — clear screen + cursor home (ANSI escape)
+  printf '\033[2J\033[H' >&2
+}
+
 _ui_wizard_timeline() { # _ui_wizard_timeline <current> <total> "label1" "label2" ... [<summaries>...]
   # current: 当前步骤号(1-based), total: 总步数
   # labels: total 个标签
@@ -385,7 +389,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   local auth_summary="Token: $(_mask_preview "$result_tok")  URL: $(_mask_preview "$result_url")"
 
   # Step 2: Models (3 main models only, _NAME hidden)
-  printf '\n' >&2
+  _ui_clear
   _ui_wizard_timeline 2 "$step_total" "${step_labels[@]}" "$auth_summary"
   result_opus="$(_ui_wizard_content "Opus 模型 ID" "$opus")" || return 1
   result_sonnet="$(_ui_wizard_content "Sonnet 模型 ID" "$sonnet")" || return 1
@@ -394,7 +398,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   local model_summary="Opus: $(_mask_preview "$result_opus")  Sonnet: $(_mask_preview "$result_sonnet")  Haiku: $(_mask_preview "$result_haiku")"
 
   # Step 3: Subagent
-  printf '\n' >&2
+  _ui_clear
   _ui_wizard_timeline 3 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary"
   result_subagent="$(_ui_wizard_content "子代理模型 (留空使用默认)" "$subagent")" || return 1
 
@@ -424,7 +428,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
     done < "$existing_file"
   fi
 
-  printf '\n' >&2
+  _ui_clear
   _ui_wizard_timeline 4 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary"
 
   _add_custom_env_vars "$pf" existing_keys existing_vals
@@ -441,7 +445,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   fi
 
   # Step 5: Confirmation
-  printf '\n' >&2
+  _ui_clear
   _ui_wizard_timeline 5 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
 
   _ui_wizard_confirm \
@@ -458,7 +462,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
     "$result_opus" "" "$result_sonnet" "" "$result_haiku" "" "$result_subagent"
 
   # ── Complete ─────────────────────────────────────────────────────
-  printf '\n' >&2
+  _ui_clear
   _ui_wizard_timeline $((step_total + 1)) "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
   printf '\n' >&2
   printf '  %s\n' "$(_cc_g "✓ profile $name 已保存")" >&2
