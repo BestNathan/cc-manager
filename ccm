@@ -404,6 +404,33 @@ _ui_pick() { # _ui_pick <prompt>  (候选从 stdin 逐行) -> 选中项写 stdou
   printf '%s\n' "${opts[$((n-1))]}"
 }
 
+_ui_say() { # _ui_say <title|ok|err|warn|info|dim> <text>  -> stdout(单次 gum fork)
+  local pal="$1"; shift; local text="$*"
+  if _has_gum; then
+    case "$pal" in
+      title) gum style --bold --foreground 6 -- "$text" ;;
+      ok)    gum style --foreground 2 -- "$text" ;;
+      err)   gum style --foreground 1 -- "$text" ;;
+      warn)  gum style --foreground 3 -- "$text" ;;
+      info|dim) gum style --foreground 8 -- "$text" ;;
+      *)     gum style -- "$text" ;;
+    esac
+    return
+  fi
+  if [ "$_cc_on" -eq 1 ]; then
+    case "$pal" in
+      title) printf '%s\n' "$(_cc_bc "$text")" ;;
+      ok)    printf '%s\n' "$(_cc_g "$text")" ;;
+      err)   printf '%s\n' "$(_cc_r "$text")" ;;
+      warn)  printf '%s\n' "$(_cc_y "$text")" ;;
+      info|dim) printf '%s\n' "$(_cc_d "$text")" ;;
+      *)     printf '%s\n' "$text" ;;
+    esac
+    return
+  fi
+  printf '%s\n' "$text"
+}
+
 _ui_gum_timeline() { # _ui_gum_timeline — alias to _ui_wizard_timeline
   _ui_wizard_timeline "$@"
 }

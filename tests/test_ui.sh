@@ -29,5 +29,13 @@ out="$(printf 'secret\n' | _ui_password "Pwd" "hint")"
 assert_eq "_ui_password 回退读取" "secret" "$out"
 unset CCM_NO_GUM
 
+# 渲染原语:回退路径输出纯文本(管道,无 TTY → _cc_on=0)
+out="$(CCM_NO_GUM=1 bash -c 'CCM_SOURCED=1 . "'"$CCM_BIN"'"; _ui_say ok "已保存"')"
+assert_eq "_ui_say 回退纯文本" "已保存" "$out"
+# gum 路径:经 gum 渲染(桩回显 [gum]<text>)
+mkdir -p "$STUBDIR"; make_gum_stub "$STUBDIR"
+out="$(PATH="$STUBDIR:$PATH" GUM_STUB_OUT=/dev/null bash -c 'CCM_SOURCED=1 . "'"$CCM_BIN"'"; _ui_say ok "已保存"')"
+assert_contains "_ui_say gum 渲染" "[gum]" "$out"
+
 teardown
 finish
