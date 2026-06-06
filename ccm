@@ -303,6 +303,10 @@ _ui_confirm() { # _ui_confirm <prompt> -> 0=确认 1=取消
   fi
   local a
   printf '  %s [Y/n] ' "$prompt" >&2
+  # 回退:读 y/n。注意 read 不加 `|| return 1` —— stdin 到达 EOF(非交互/headless,
+  # 如 new 向导被管道喂入定量空行)时视为"确认",与旧 _ui_wizard_confirm 语义一致。
+  # ⚠️ 共享原语:若未来给"破坏性操作"(如 rm)接入 _ui_confirm,EOF 默认确认是不安全的,
+  # 那种调用方应显式要求肯定输入,不要依赖此默认。
   IFS= read -r a
   case "$a" in n|N|no|NO) return 1 ;; *) return 0 ;; esac
 }
@@ -518,7 +522,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   _ui_say dim "Token: $(_mask_preview "$result_tok")" >&2
   _ui_say dim "URL:   $(_mask_preview "$result_url")" >&2
   _ui_say dim "Opus:  $result_opus" >&2
-  _ui_say dim "Sonnet:$result_sonnet" >&2
+  _ui_say dim "Sonnet: $result_sonnet" >&2
   _ui_say dim "Haiku: $result_haiku" >&2
   _ui_confirm "确认保存以上配置?" || return 1
 
