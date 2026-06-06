@@ -186,5 +186,14 @@ printf 'y\n' | GUM_STUB_OUT="$SANDBOX/gumrm.txt" CCM_HOME="$SANDBOX" PATH="$STUB
 assert_eq "rm delme 删除成功" "no" "$([ -f "$SANDBOX/profiles/delme.env" ] && echo yes || echo no)"
 assert_contains "rm 成功消息经 gum 渲染" "GUM style" "$(cat "$SANDBOX/gumrm.txt")"
 
+# backup-restore 缺 N:在 gum 可用时也应直接用法报错(退出2),不弹选择器
+make_gum_stub "$STUBDIR"
+cat >"$SANDBOX/profiles/brtest.env" <<'EOF'
+export ANTHROPIC_BASE_URL="https://gw.example.com"
+EOF
+GUM_STUB_OUT="$SANDBOX/gumbr.txt" CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" bash "$CCM_BIN" backup-restore brtest >/dev/null 2>&1
+assert_eq "backup-restore 缺N退出2" "2" "$?"
+assert_eq "backup-restore 缺N不弹选择器" "no" "$([ -s "$SANDBOX/gumbr.txt" ] && grep -q 'filter' "$SANDBOX/gumbr.txt" && echo yes || echo no)"
+
 teardown
 finish

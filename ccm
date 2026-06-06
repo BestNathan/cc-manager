@@ -456,7 +456,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
   else title_text="编辑 profile: $name"; fi
   printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━ $title_text ━━━")" >&2
+  _ui_say title "━━━ $title_text ━━━" >&2
   printf '\n' >&2
 
   # ── 5-step wizard ───────────────────────────────────────────────
@@ -737,7 +737,7 @@ cmd_list() {
     rows+=("$(printf '%-20s %s' "$name" "${url:-(no base_url)}")")
   done
   if [ "$found" -ne 1 ]; then
-    echo "(暂无 profile,用 'ccm new <name>' 创建)"
+    _ui_say dim "(暂无 profile,用 'ccm new <name>' 创建)"
     return
   fi
   if _has_gum; then
@@ -921,23 +921,24 @@ cmd_backup_list() {
   local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
 
-  printf '\n  %s\n' "$(_cc_bc "━━━ profile: $name 的备份 ━━━")"
+  printf '\n'
+  _ui_say title "━━━ profile: $name 的备份 ━━━"
   printf '\n'
 
   if _list_backups "$pf" "$name"; then
     printf '\n'
-    printf '  %s\n' "$(_cc_d '💡 回滚: ccm backup-restore '"$name"' <序号>')"
+    _ui_say info "💡 回滚: ccm backup-restore $name <序号>"
     printf '\n'
   else
-    printf '  %s\n' "$(_cc_d '(暂无备份)')"
+    _ui_say dim "(暂无备份)"
     printf '\n'
   fi
 }
 
 cmd_backup_restore() {
   local n="$2"
-  local name; name="$(_resolve_profile_arg "用法: ccm backup-restore <profile> <N>" "$1")" || exit $?
   [ -n "$n" ] || _die 2 "用法: ccm backup-restore <profile> <N>"
+  local name; name="$(_resolve_profile_arg "用法: ccm backup-restore <profile> <N>" "$1")" || exit $?
 
   # Validate N is a number
   case "$n" in
