@@ -262,73 +262,6 @@ _gum_interactive() { # 交互门:在渲染门基础上额外要求 /dev/tty 可�
   _has_gum && { : < /dev/tty; } 2>/dev/null
 }
 
-_ui_gum_input() { # _ui_gum_input <label> <hint> <initial> <password:0|1> -> writes to _GUM_RESULT
-  # gum input requires /dev/tty. Fall back to shell read if unavailable.
-  local label="$1" hint="$2" initial="$3" password="${4:-0}"
-
-  # Try gum first
-  local -a cmd=(gum input --header "$label" --header.foreground "6")
-  [ "$password" -eq 1 ] && cmd+=(--password)
-  [ -n "$initial" ] && cmd+=(--value "$initial")
-  cmd+=(--placeholder "$hint")
-
-  local tmpfile
-  tmpfile="$(mktemp)" || return 1
-  # gum renders its interactive UI to stderr. Send it to /dev/tty (not
-  # /dev/null) — redirecting stderr away from the terminal makes gum
-  # detect a non-tty output and bail without ever showing the prompt.
-  # stdout carries the result value, captured via the temp file.
-  if "${cmd[@]}" < /dev/tty > "$tmpfile" 2>/dev/tty; then
-    _GUM_RESULT="$(cat "$tmpfile")"
-    rm -f "$tmpfile"
-    return 0
-  fi
-  rm -f "$tmpfile"
-
-  # Fallback: shell read (gum unavailable or /dev/tty missing)
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━ $label ━━━")" >&2
-  [ -n "$hint" ] && printf '  %s\n' "$(_cc_d "$hint")" >&2
-  printf '\n' >&2
-  if [ -n "$initial" ]; then
-    printf '  %s %s\n' "$(_cc_d '当前值:')" "$(_cc_y "$(_mask_preview "$initial")")" >&2
-  fi
-  printf '  %s ' "$(_cc_d '输入新值 (回车保留):')" >&2
-  local answer
-  read -r answer || return 1
-  if [ -z "$answer" ] && [ -n "$initial" ]; then
-    _GUM_RESULT="$initial"
-  else
-    _GUM_RESULT="$answer"
-  fi
-}
-
-_ui_gum_confirm() { # _ui_gum_confirm <label1> <val1> <label2> <val2> ... -> 0 if confirmed
-  _ui_clear
-
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━━━━━━ 确认配置 ━━━━━━━━")" >&2
-  printf '\n' >&2
-
-  while [ $# -ge 2 ]; do
-    local label="$1" val="$2"; shift 2
-    local display
-    if [ -z "$val" ]; then
-      display="$(_cc_d '(未设置)')"
-    else
-      display="$(_cc_y "$(_mask_preview "$val")")"
-    fi
-    printf '       %s  %s: %s\n' "$(_cc_g '●')" "$(_cc_c "$label")" "$display" >&2
-  done
-
-  printf '\n' >&2
-  # gum confirm reports the answer via exit code (0=yes, 1=no) and renders
-  # its UI to stderr. Send stderr to /dev/tty so the prompt is visible —
-  # /dev/null would hide it and make gum exit without prompting. This
-  # function only runs inside the gum wizard, so gum is known to work here.
-  gum confirm "确认保存以上配置?" < /dev/tty >/dev/tty 2>&1
-}
-
 _ui_input() { # _ui_input <label> <hint> <initial> -> 结果写 stdout
   local label="$1" hint="$2" initial="$3"
   if _gum_interactive; then
@@ -358,7 +291,7 @@ _ui_password() { # _ui_password <label> <hint> -> 结果写 stdout
   fi
   local ans
   printf '  %s' "$(_cc_d "$label: ")" >&2
-  IFS= read -r ans || return 1
+  IFS= read -rs ans || return 1
   printf '%s\n' "$ans"
 }
 
@@ -370,7 +303,7 @@ _ui_confirm() { # _ui_confirm <prompt> -> 0=确认 1=取消
   fi
   local a
   printf '  %s [Y/n] ' "$prompt" >&2
-  IFS= read -r a || return 1
+  IFS= read -r a
   case "$a" in n|N|no|NO) return 1 ;; *) return 0 ;; esac
 }
 
@@ -431,121 +364,6 @@ _ui_say() { # _ui_say <title|ok|err|warn|info|dim> <text>  -> stdout(单次 gum 
   printf '%s\n' "$text"
 }
 
-_ui_gum_timeline() { # _ui_gum_timeline — alias to _ui_wizard_timeline
-  _ui_wizard_timeline "$@"
-}
-
-_ui_gum_wizard() { # _ui_gum_wizard <mode> <name> <existing_file> <tok> <url> <opus> <opus_n> <sonnet> <sonnet_n> <haiku> <haiku_n> <subagent>
-  local mode="$1" name="$2" existing_file="$3"
-  local tok="$4" url="$5" opus="$6" opus_n="$7" sonnet="$8" sonnet_n="$9"
-  local haiku="${10}" haiku_n="${11}" subagent="${12}"
-
-  local pf; pf="$(_profile_path "$name")" || return $?
-
-  # ── Title ────────────────────────────────────────────────────────
-  local title_text
-  if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
-  else title_text="编辑 profile: $name"; fi
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━ $title_text ━━━")" >&2
-  printf '\n' >&2
-
-  # ── 5-step gum wizard ───────────────────────────────────────────
-  local step_total=5
-  local -a step_labels=("身份认证" "模型映射" "子代理" "自定义变量" "确认")
-
-  local result_tok result_url result_opus result_sonnet result_haiku result_subagent
-
-  # Step 1: Auth (Token + URL) — no clear, keep title visible
-  _ui_gum_timeline 1 "$step_total" "${step_labels[@]}"
-  _ui_gum_input "API Token" "sk-ant-..." "$tok" 1 || return 1
-  result_tok="$_GUM_RESULT"
-  _ui_gum_input "Base URL" "https://api.example.com/v1" "$url" 0 || return 1
-  result_url="$_GUM_RESULT"
-
-  local auth_summary="Token: $(_mask_preview "$result_tok")  URL: $(_mask_preview "$result_url")"
-
-  # Step 2: Models
-  _ui_clear
-  _ui_gum_timeline 2 "$step_total" "${step_labels[@]}" "$auth_summary"
-  _ui_gum_input "Opus 模型 ID" "claude-opus-4-8" "$opus" 0 || return 1
-  result_opus="$_GUM_RESULT"
-  _ui_gum_input "Sonnet 模型 ID" "claude-sonnet-4-6" "$sonnet" 0 || return 1
-  result_sonnet="$_GUM_RESULT"
-  _ui_gum_input "Haiku 模型 ID" "claude-haiku-4-5-20251001" "$haiku" 0 || return 1
-  result_haiku="$_GUM_RESULT"
-
-  local model_summary="Opus: $(_mask_preview "$result_opus")  Sonnet: $(_mask_preview "$result_sonnet")  Haiku: $(_mask_preview "$result_haiku")"
-
-  # Step 3: Subagent
-  _ui_clear
-  _ui_gum_timeline 3 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary"
-  _ui_gum_input "子代理模型 (可选)" "留空使用默认" "$subagent" 0 || return 1
-  result_subagent="$_GUM_RESULT"
-
-  local subagent_summary
-  if [ -n "$result_subagent" ]; then subagent_summary="$(_mask_preview "$result_subagent")"
-  else subagent_summary="(未设置)"; fi
-
-  # Step 4: Custom env vars
-  _ui_clear
-  _ui_gum_timeline 4 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary"
-
-  # Extract existing custom vars
-  local -a existing_keys=()
-  local -a existing_vals=()
-  if [ -n "$existing_file" ] && [ -f "$existing_file" ]; then
-    while IFS= read -r line; do
-      local ekey eval
-      ekey="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
-      [ -n "$ekey" ] || continue
-      eval="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*${ekey}=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
-      case "$ekey" in
-        ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|\
-        ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL_NAME|\
-        ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL_NAME|\
-        ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME|\
-        CLAUDE_CODE_SUBAGENT_MODEL) continue ;;
-      esac
-      existing_keys+=("$ekey")
-      existing_vals+=("$eval")
-    done < "$existing_file"
-  fi
-
-  _add_custom_env_vars "$pf" existing_keys existing_vals
-
-  local custom_summary="(无)"
-  if [ "${#_CUSTOM_KEYS[@]}" -gt 0 ]; then
-    custom_summary=""
-    local i
-    for i in "${!_CUSTOM_KEYS[@]}"; do
-      [ -n "$custom_summary" ] && custom_summary+=" "
-      custom_summary+="${_CUSTOM_KEYS[$i]}=$(_mask_preview "${_CUSTOM_VALS[$i]}")"
-    done
-  fi
-
-  # Step 5: Confirmation
-  _ui_gum_confirm \
-    "Auth Token" "$result_tok" \
-    "Base URL" "$result_url" \
-    "Opus Model" "$result_opus" \
-    "Sonnet Model" "$result_sonnet" \
-    "Haiku Model" "$result_haiku" \
-    "Subagent" "$result_subagent" \
-    || return 1
-
-  # ── Write profile ───────────────────────────────────────────────
-  _write_profile "$pf" "$result_tok" "$result_url" \
-    "$result_opus" "" "$result_sonnet" "" "$result_haiku" "" "$result_subagent"
-
-  # ── Complete ─────────────────────────────────────────────────────
-  _ui_clear
-  _ui_gum_timeline $((step_total + 1)) "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_g "✓ profile $name 已保存")" >&2
-  printf '\n' >&2
-}
-
 _ui_wizard_timeline() { # _ui_wizard_timeline <current> <total> "label1" "label2" ... [<summaries>...]
   # current: 当前步骤号(1-based), total: 总步数
   # labels: total 个标签
@@ -576,50 +394,6 @@ _ui_wizard_timeline() { # _ui_wizard_timeline <current> <total> "label1" "label2
       printf '  %s  %s  %s\n' "$(_cc_c '◎')" "$(_cc_bc "${labels[$i]}")" "$conn" >&2
     fi
   done
-}
-
-_ui_wizard_content() { # _ui_wizard_content <hint> <initial> -> stdout result
-  local hint="$1" initial="$2"
-  # 7 spaces align with timeline label position (2sp + dot + 2sp + 2sp)
-  [ -n "$hint" ] && printf '       %s\n' "$(_cc_d "$hint")" >&2
-  if [ -n "$initial" ]; then
-    printf '       %s %s\n' "$(_cc_d '当前值:')" "$(_cc_y "$(_mask_preview "$initial")")" >&2
-  fi
-  printf '       %s ' "$(_cc_d '输入新值 (回车保留):')" >&2
-
-  local answer
-  read -r answer || return 1
-  if [ -z "$answer" ] && [ -n "$initial" ]; then
-    printf '%s' "$initial"
-  else
-    printf '%s' "$answer"
-  fi
-}
-
-_ui_wizard_confirm() { # _ui_wizard_confirm <label1> <val1> <label2> <val2> ...
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━━━━━━ 确认配置 ━━━━━━━━")" >&2
-  printf '\n' >&2
-
-  while [ $# -ge 2 ]; do
-    local label="$1" val="$2"; shift 2
-    local display
-    if [ -z "$val" ]; then
-      display="$(_cc_d '(未设置)')"
-    else
-      display="$(_cc_y "$(_mask_preview "$val")")"
-    fi
-    printf '       %s  %s: %s\n' "$(_cc_g '●')" "$(_cc_c "$label")" "$display" >&2
-  done
-  printf '\n' >&2
-  printf '       %s %s' "$(_cc_y "?")" "确认保存以上配置? [Y/n] " >&2
-
-  local ans
-  read -r ans
-  case "$ans" in
-    n|N|no|NO) return 1 ;;
-    *) return 0 ;;
-  esac
 }
 
 _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [existing_file]
@@ -656,13 +430,6 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
 
   local pf; pf="$(_profile_path "$name")" || return $?
 
-  # ── Dispatch to gum UI if available ─────────────────────────────
-  if _has_gum; then
-    _ui_gum_wizard "$mode" "$name" "$existing_file" \
-      "$tok" "$url" "$opus" "$opus_n" "$sonnet" "$sonnet_n" "$haiku" "$haiku_n" "$subagent"
-    return $?
-  fi
-
   # ── Title ────────────────────────────────────────────────────────
   local title_text
   if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
@@ -680,9 +447,9 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   # Step 1: Auth (Token + URL merged)
   printf '\n' >&2
   _ui_wizard_timeline 1 "$step_total" "${step_labels[@]}"
-  result_tok="$(_ui_wizard_content "API Token" "$tok")" || return 1
-  printf '\n' >&2
-  result_url="$(_ui_wizard_content "Base URL" "$url")" || return 1
+  result_tok="$(_ui_password "API Token" "sk-ant-...")" || return 1
+  [ -n "$result_tok" ] || result_tok="$tok"
+  result_url="$(_ui_input "Base URL" "https://api.example.com/v1" "$url")" || return 1
 
   # Build auth summary for completed step display
   local auth_summary="Token: $(_mask_preview "$result_tok")  URL: $(_mask_preview "$result_url")"
@@ -690,16 +457,16 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   # Step 2: Models (3 main models only, _NAME hidden)
   _ui_clear
   _ui_wizard_timeline 2 "$step_total" "${step_labels[@]}" "$auth_summary"
-  result_opus="$(_ui_wizard_content "Opus 模型 ID" "$opus")" || return 1
-  result_sonnet="$(_ui_wizard_content "Sonnet 模型 ID" "$sonnet")" || return 1
-  result_haiku="$(_ui_wizard_content "Haiku 模型 ID" "$haiku")" || return 1
+  result_opus="$(_ui_input "Opus 模型 ID" "claude-opus-4-8" "$opus")" || return 1
+  result_sonnet="$(_ui_input "Sonnet 模型 ID" "claude-sonnet-4-6" "$sonnet")" || return 1
+  result_haiku="$(_ui_input "Haiku 模型 ID" "claude-haiku-4-5-20251001" "$haiku")" || return 1
 
   local model_summary="Opus: $(_mask_preview "$result_opus")  Sonnet: $(_mask_preview "$result_sonnet")  Haiku: $(_mask_preview "$result_haiku")"
 
   # Step 3: Subagent
   _ui_clear
   _ui_wizard_timeline 3 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary"
-  result_subagent="$(_ui_wizard_content "子代理模型 (留空使用默认)" "$subagent")" || return 1
+  result_subagent="$(_ui_input "子代理模型 (留空使用默认)" "" "$subagent")" || return 1
 
   local subagent_summary
   if [ -n "$result_subagent" ]; then subagent_summary="$(_mask_preview "$result_subagent")"
@@ -747,14 +514,13 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   _ui_clear
   _ui_wizard_timeline 5 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
 
-  _ui_wizard_confirm \
-    "Auth Token" "$result_tok" \
-    "Base URL" "$result_url" \
-    "Opus Model" "$result_opus" \
-    "Sonnet Model" "$result_sonnet" \
-    "Haiku Model" "$result_haiku" \
-    "Subagent" "$result_subagent" \
-    || return 1
+  _ui_say title "━━━━━━━━ 确认配置 ━━━━━━━━" >&2
+  _ui_say dim "Token: $(_mask_preview "$result_tok")" >&2
+  _ui_say dim "URL:   $(_mask_preview "$result_url")" >&2
+  _ui_say dim "Opus:  $result_opus" >&2
+  _ui_say dim "Sonnet:$result_sonnet" >&2
+  _ui_say dim "Haiku: $result_haiku" >&2
+  _ui_confirm "确认保存以上配置?" || return 1
 
   # ── Write profile ───────────────────────────────────────────────
   _write_profile "$pf" "$result_tok" "$result_url" \
