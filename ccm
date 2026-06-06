@@ -727,17 +727,24 @@ _add_custom_env_vars_read() { # _add_custom_env_vars_read <profile_file> keys_re
 cmd_list() {
   _ensure_skeleton
   local found=0 f name url line
+  local -a rows=()
   for f in "$PROFILES_DIR"/*.env; do
     [ -e "$f" ] || continue
     found=1
     name="$(basename "$f" .env)"
     line="$(grep -E '^[[:space:]]*export[[:space:]]+ANTHROPIC_BASE_URL=' "$f" | head -1)"
-    url="${line#*=}"
-    url="${url%\"}"; url="${url#\"}"
-    url="${url%\'}"; url="${url#\'}"
-    printf '%-20s %s\n' "$name" "${url:-(no base_url)}"
+    url="${line#*=}"; url="${url%\"}"; url="${url#\"}"; url="${url%\'}"; url="${url#\'}"
+    rows+=("$(printf '%-20s %s' "$name" "${url:-(no base_url)}")")
   done
-  [ "$found" -eq 1 ] || echo "(暂无 profile,用 'ccm new <name>' 创建)"
+  if [ "$found" -ne 1 ]; then
+    echo "(暂无 profile,用 'ccm new <name>' 创建)"
+    return
+  fi
+  if _has_gum; then
+    printf '%s\n' "${rows[@]}" | gum style --foreground 7
+  else
+    printf '%s\n' "${rows[@]}"
+  fi
 }
 
 cmd_new() {

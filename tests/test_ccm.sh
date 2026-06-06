@@ -151,5 +151,18 @@ assert_eq "run --opus 缺值不挂起且退出2" "2" "$rc"
 run_ccm run work --sonnet --opus >/dev/null 2>&1
 assert_eq "run --sonnet 值为flag报错2" "2" "$?"
 
+# list gum 渲染分支测试
+make_gum_stub "$STUBDIR"
+cat >"$SANDBOX/profiles/work.env" <<'EOF'
+export ANTHROPIC_AUTH_TOKEN="sk-abcd1234efgh5678"
+export ANTHROPIC_BASE_URL="https://gw.example.com"
+EOF
+GUM_STUB_OUT="$SANDBOX/gumlog.txt" CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" bash "$CCM_BIN" list >/dev/null 2>&1
+assert_contains "list 走 gum 渲染分支" "GUM style" "$(cat "$SANDBOX/gumlog.txt")"
+# 回退路径仍含 work、不泄露 token
+out="$(CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" CCM_NO_GUM=1 bash "$CCM_BIN" list)"
+assert_contains "list 回退含 work" "work" "$out"
+assert_eq "list 回退不泄露 token" "no" "$(printf '%s' "$out" | grep -q 'sk-abcd' && echo yes || echo no)"
+
 teardown
 finish
