@@ -254,9 +254,13 @@ _ui_clear() { # _ui_clear — clear screen + cursor home (ANSI escape)
   printf '\033[2J\033[H' >&2
 }
 
-_has_gum() { # _has_gum -> 0 if gum input actually works (needs /dev/tty)
-  [ -z "${CCM_NO_GUM:-}" ] && command -v gum >/dev/null 2>&1 && \
-    gum input --timeout 50ms --width 1 < /dev/tty >/dev/null 2>&1
+_has_gum() { # _has_gum -> 0 if gum is available and stdin is a TTY
+  # gum input/confirm require /dev/tty. In interactive use stdin is the
+  # terminal, so -t 0 is a reliable gate. When stdin is not a TTY
+  # (piped input, CI, tests), the shell fallback in _ui_gum_input and
+  # _ui_gum_confirm handles the rare case where -t 0 is true but gum
+  # still fails.
+  [ -z "${CCM_NO_GUM:-}" ] && command -v gum >/dev/null 2>&1 && [ -t 0 ]
 }
 
 _ui_gum_input() { # _ui_gum_input <label> <hint> <initial> <password:0|1> -> writes to _GUM_RESULT
@@ -271,7 +275,11 @@ _ui_gum_input() { # _ui_gum_input <label> <hint> <initial> <password:0|1> -> wri
 
   local tmpfile
   tmpfile="$(mktemp)" || return 1
-  if "${cmd[@]}" < /dev/tty > "$tmpfile" 2>/dev/null; then
+  # gum renders its interactive UI to stderr. Send it to /dev/tty (not
+  # /dev/null) — redirecting stderr away from the terminal makes gum
+  # detect a non-tty output and bail without ever showing the prompt.
+  # stdout carries the result value, captured via the temp file.
+  if "${cmd[@]}" < /dev/tty > "$tmpfile" 2>/dev/tty; then
     _GUM_RESULT="$(cat "$tmpfile")"
     rm -f "$tmpfile"
     return 0
@@ -315,8 +323,11 @@ _ui_gum_confirm() { # _ui_gum_confirm <label1> <val1> <label2> <val2> ... -> 0 i
   done
 
   printf '\n' >&2
-  gum confirm "确认保存以上配置?" < /dev/tty >/dev/null 2>&1 || \
-    { printf '  确认保存? [Y/n] ' >&2; local a; read -r a; case "$a" in n|N|no|NO) return 1 ;; esac; }
+  # gum confirm reports the answer via exit code (0=yes, 1=no) and renders
+  # its UI to stderr. Send stderr to /dev/tty so the prompt is visible —
+  # /dev/null would hide it and make gum exit without prompting. This
+  # function only runs inside the gum wizard, so gum is known to work here.
+  gum confirm "确认保存以上配置?" < /dev/tty >/dev/tty 2>&1
 }
 
 _ui_gum_timeline() { # _ui_gum_timeline — alias to _ui_wizard_timeline
