@@ -164,5 +164,18 @@ out="$(CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" CCM_NO_GUM=1 bash "$CCM_BIN" li
 assert_contains "list 回退含 work" "work" "$out"
 assert_eq "list 回退不泄露 token" "no" "$(printf '%s' "$out" | grep -q 'sk-abcd' && echo yes || echo no)"
 
+# show 在 gum 可用时走 gum 渲染分支(经 GUM_STUB_OUT 日志证明),且仍打码
+make_gum_stub "$STUBDIR"
+cat >"$SANDBOX/profiles/masktest.env" <<'EOF'
+export ANTHROPIC_AUTH_TOKEN="sk-5_nclDqRENf1rPMBiPp8Aw"
+export ANTHROPIC_BASE_URL="https://gw.example.com"
+EOF
+GUM_STUB_OUT="$SANDBOX/gumshow.txt" CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" bash "$CCM_BIN" show masktest >/dev/null 2>&1
+assert_contains "show 走 gum 渲染分支" "GUM style" "$(cat "$SANDBOX/gumshow.txt")"
+# 回退路径仍打码、不露原 token
+out="$(CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" CCM_NO_GUM=1 bash "$CCM_BIN" show masktest)"
+assert_eq "show 回退不露原token" "no" "$(printf '%s' "$out" | grep -q 'sk-5_nclDqRENf1rPMBiPp8Aw' && echo yes || echo no)"
+assert_contains "show 回退保留头部" "sk-5" "$out"
+
 teardown
 finish

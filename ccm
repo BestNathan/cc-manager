@@ -800,7 +800,8 @@ cmd_show() {
     return
   fi
   # 打码显示: token 掩码,其余原样
-  local line val
+  local line val k v rendered
+  rendered="$(
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       *ANTHROPIC_AUTH_TOKEN=*)
@@ -817,7 +818,6 @@ cmd_show() {
         ;;
       *export\ ANTHROPIC_DEFAULT_*|*export\ CLAUDE_CODE_SUBAGENT_MODEL*)
         # Standard model vars: show key + colored value
-        local k v
         k="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
         v="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*[A-Z_][A-Z0-9_]*=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
         if [ -n "$k" ] && [ -n "$v" ]; then
@@ -828,7 +828,6 @@ cmd_show() {
         ;;
       *export\ *CLAUDE_CODE_*|*export\ *BASH_*|*export\ *API_*|*export\ *MCP_*|*export\ *DEBUG*|*export\ *DISABLE_*|*export\ *ENABLE_*|*export\ *MAX_*|*export\ *HTTP_*|*export\ *NO_*)
         # Custom env vars: show key + yellow value
-        local k v
         k="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
         v="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*[A-Z_][A-Z0-9_]*=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
         if [ -n "$k" ] && [ -n "$v" ]; then
@@ -850,6 +849,12 @@ cmd_show() {
       *) printf '%s\n' "$line" ;;
     esac
   done <"$pf"
+  )"
+  if _has_gum; then
+    printf '%s\n' "$rendered" | gum style --foreground 7
+  else
+    printf '%s\n' "$rendered"
+  fi
 }
 
 cmd_env() {
