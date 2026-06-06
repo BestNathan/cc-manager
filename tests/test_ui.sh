@@ -25,6 +25,8 @@ assert_eq "_ui_input 输入覆盖" "NEW" "$out"
 ( printf 'n\n' | _ui_confirm "ok?" ); assert_eq "_ui_confirm n=1" "1" "$?"
 out="$(printf 'alpha\nbeta\ngamma\n2\n' | _ui_pick "选择")"
 assert_eq "_ui_pick 选第2项" "beta" "$out"
+out="$(printf 'secret\n' | _ui_password "Pwd" "hint")"
+assert_eq "_ui_password 回退读取" "secret" "$out"
 unset CCM_NO_GUM
 
 teardown

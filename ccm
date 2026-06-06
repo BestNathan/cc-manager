@@ -380,8 +380,7 @@ _ui_pick() { # _ui_pick <prompt>  (候选从 stdin 逐行) -> 选中项写 stdou
   while IFS= read -r line; do [ -n "$line" ] && opts+=("$line"); done
   [ "${#opts[@]}" -gt 0 ] || return 1
   if _gum_interactive; then
-    printf '%s\n' "${opts[@]}" | gum filter --header "$prompt" --header.foreground 6 \
-      < /dev/tty 2>/dev/tty
+    printf '%s\n' "${opts[@]}" | gum filter --header "$prompt" --header.foreground 6 2>/dev/tty
     return $?
   fi
   local i
