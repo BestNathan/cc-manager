@@ -131,7 +131,7 @@ assert_eq "run 缺名退出码2" "2" "$?"
 # 用后台子进程 + kill 兜底,避免死循环卡住测试
 _timed_run() { # _timed_run <秒> <args...>; 打印退出码,超时则视为失败(码124)
   local secs="$1"; shift
-  ( CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" CCM_NO_DIALOG=1 bash "$CCM_BIN" "$@" >/dev/null 2>&1 ) &
+  ( CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" CCM_NO_GUM=1 bash "$CCM_BIN" "$@" >/dev/null 2>&1 ) &
   local pid=$!
   ( sleep "$secs"; kill -9 "$pid" 2>/dev/null ) &
   local killer=$!
