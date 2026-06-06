@@ -177,5 +177,14 @@ out="$(CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" CCM_NO_GUM=1 bash "$CCM_BIN" sh
 assert_eq "show 回退不露原token" "no" "$(printf '%s' "$out" | grep -q 'sk-5_nclDqRENf1rPMBiPp8Aw' && echo yes || echo no)"
 assert_contains "show 回退保留头部" "sk-5" "$out"
 
+# rm 成功消息经 _ui_say,在 gum 可用时走 gum 渲染(经 GUM_STUB_OUT 日志证明)
+make_gum_stub "$STUBDIR"
+cat >"$SANDBOX/profiles/delme.env" <<'EOF'
+export ANTHROPIC_BASE_URL="https://gw.example.com"
+EOF
+printf 'y\n' | GUM_STUB_OUT="$SANDBOX/gumrm.txt" CCM_HOME="$SANDBOX" PATH="$STUBDIR:$PATH" bash "$CCM_BIN" rm delme >/dev/null 2>&1
+assert_eq "rm delme 删除成功" "no" "$([ -f "$SANDBOX/profiles/delme.env" ] && echo yes || echo no)"
+assert_contains "rm 成功消息经 gum 渲染" "GUM style" "$(cat "$SANDBOX/gumrm.txt")"
+
 teardown
 finish

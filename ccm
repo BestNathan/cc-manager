@@ -551,7 +551,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   _ui_clear
   _ui_wizard_timeline $((step_total + 1)) "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
   printf '\n' >&2
-  printf '  %s\n' "$(_cc_g "✓ profile $name 已保存")" >&2
+  _ui_say ok "✓ profile $name 已保存" >&2
   printf '\n' >&2
 }
 
@@ -755,10 +755,10 @@ cmd_new() {
   [ -f "$pf" ] && _die 1 "profile '$name' 已存在(用 'ccm edit $name')"
 
   if _interactive_profile "new" "$name"; then
-    printf '%s %s\n' "$(_cc_g '✓')" "已创建 $(_cc_c "$pf")"
+    _ui_say ok "✓ 已创建 $pf"
   else
     rm -f "$pf"
-    printf '%s 已取消\n' "$(_cc_r '✖')" >&2
+    _ui_say err "✖ 已取消" >&2
     exit 1
   fi
 }
@@ -772,13 +772,13 @@ cmd_edit() {
   _rotate_backups "$pf"
 
   if _interactive_profile "edit" "$name" "$pf"; then
-    printf '%s %s\n' "$(_cc_g '✓')" "已更新 $(_cc_c "$pf")"
+    _ui_say ok "✓ 已更新 $pf"
     # Show backup hint if backups exist
     if [ -f "${pf}.back.1" ]; then
-      printf '  %s 使用 %s 查看备份记录\n' "$(_cc_d '💡')" "$(_cc_c "ccm backup-list $name")"
+      _ui_say info "💡 使用 ccm backup-list $name 查看备份记录"
     fi
   else
-    printf '%s 已取消，未保存更改\n' "$(_cc_r '✖')" >&2
+    _ui_say err "✖ 已取消，未保存更改" >&2
     exit 1
   fi
 }
@@ -910,7 +910,7 @@ cmd_rm() {
   printf "%s确认删除 profile '%s'? [y/N] " "$(_cc_r '⚠ ')" "$name"
   local ans; read -r ans
   case "$ans" in
-    y|Y|yes|YES) rm -f "$pf"; printf '%s %s\n' "$(_cc_r '✖')" "已删除 $(_cc_r "$name")" ;;
+    y|Y|yes|YES) rm -f "$pf"; _ui_say ok "✓ 已删除 $name" ;;
     *) echo "已取消" ;;
   esac
 }
@@ -958,9 +958,9 @@ cmd_backup_restore() {
 
   _restore_backup "$pf" "$n"
 
-  printf '%s 已回滚 %s 到 back.%s\n' "$(_cc_g '✓')" "$(_cc_c "$pf")" "$n"
-  printf '  %s 当前版本已保存为 back.1\n' "$(_cc_d '💡')"
-  printf '  %s 使用 %s 查看备份记录\n' "$(_cc_d '💡')" "$(_cc_c "ccm backup-list $name")"
+  _ui_say ok "✓ 已回滚 $pf 到 back.$n"
+  _ui_say info "💡 当前版本已保存为 back.1"
+  _ui_say info "💡 使用 ccm backup-list $name 查看备份记录"
 }
 
 usage_run() {
