@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/helpers.sh"
+CCM_BIN="$HERE/../ccm"
+setup
+
+# source ccm 的函数定义(用 CCM_SOURCED 短路 main)
+CCM_SOURCED=1 . "$CCM_BIN"
+
+# 渲染门:有 gum 二进制即真(不要求 tty)
+PATH="$STUBDIR:$PATH"; make_gum_stub "$STUBDIR"
+assert_eq "_has_gum 有gum为真" "0" "$(_has_gum; echo $?)"
+assert_eq "CCM_NO_GUM=1 渲染门为假" "1" "$(CCM_NO_GUM=1; _has_gum; echo $?)"
+
+# 交互门:CCM_NO_GUM=1 必为假
+assert_eq "CCM_NO_GUM=1 交互门为假" "1" "$(CCM_NO_GUM=1; _gum_interactive; echo $?)"
+
+# 交互原语回退路径(CCM_NO_GUM=1 → 走 read)
+export CCM_NO_GUM=1
+out="$(printf '\n' | _ui_input "Token" "hint" "DEFLT")"
+assert_eq "_ui_input 空回车保留默认" "DEFLT" "$out"
+out="$(printf 'NEW\n' | _ui_input "Token" "hint" "DEFLT")"
+assert_eq "_ui_input 输入覆盖" "NEW" "$out"
+( printf 'y\n' | _ui_confirm "ok?" ); assert_eq "_ui_confirm y=0" "0" "$?"
+( printf 'n\n' | _ui_confirm "ok?" ); assert_eq "_ui_confirm n=1" "1" "$?"
+( printf '' | _ui_confirm "ok?" ); assert_eq "_ui_confirm EOF=确认(0)" "0" "$?"
+out="$(printf 'alpha\nbeta\ngamma\n2\n' | _ui_pick "选择")"
+assert_eq "_ui_pick 选第2项" "beta" "$out"
+out="$(printf 'secret\n' | _ui_password "Pwd" "hint")"
+assert_eq "_ui_password 回退读取" "secret" "$out"
+unset CCM_NO_GUM
+
+# 渲染原语:回退路径输出纯文本(管道,无 TTY → _cc_on=0)
+out="$(CCM_NO_GUM=1 bash -c 'CCM_SOURCED=1 . "'"$CCM_BIN"'"; _ui_say ok "已保存"')"
+assert_eq "_ui_say 回退纯文本" "已保存" "$out"
+# gum 路径:经 gum 渲染(桩回显 [gum]<text>)
+mkdir -p "$STUBDIR"; make_gum_stub "$STUBDIR"
+out="$(PATH="$STUBDIR:$PATH" GUM_STUB_OUT=/dev/null bash -c 'CCM_SOURCED=1 . "'"$CCM_BIN"'"; _ui_say ok "已保存"')"
+assert_contains "_ui_say gum 渲染" "[gum]" "$out"
+
+# _resolve_profile_arg: 给名字原样返回
+out="$(_resolve_profile_arg "用法: x" "myprof")"
+assert_eq "_resolve_profile_arg 给名返回" "myprof" "$out"
+# 缺名 + 无 gum(CCM_NO_GUM=1)→ _die 2(子shell 捕获退出码)
+( CCM_NO_GUM=1; _resolve_profile_arg "用法: x" >/dev/null 2>&1 ); assert_eq "_resolve_profile_arg 缺名无gum退出2" "2" "$?"
+
+teardown
+finish

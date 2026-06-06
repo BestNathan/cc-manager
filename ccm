@@ -254,184 +254,135 @@ _ui_clear() { # _ui_clear — clear screen + cursor home (ANSI escape)
   printf '\033[2J\033[H' >&2
 }
 
-_has_gum() { # _has_gum -> 0 if gum input actually works (needs /dev/tty)
-  [ -z "${CCM_NO_GUM:-}" ] && command -v gum >/dev/null 2>&1 && \
-    gum input --timeout 50ms --width 1 < /dev/tty >/dev/null 2>&1
+_has_gum() { # 渲染门:gum 可执行且未被禁用(不要求 TTY,gum style/format 输出 ANSI 到管道也可)
+  [ -z "${CCM_NO_GUM:-}" ] && command -v gum >/dev/null 2>&1
 }
 
-_ui_gum_input() { # _ui_gum_input <label> <hint> <initial> <password:0|1> -> writes to _GUM_RESULT
-  # gum input requires /dev/tty. Fall back to shell read if unavailable.
-  local label="$1" hint="$2" initial="$3" password="${4:-0}"
-
-  # Try gum first
-  local -a cmd=(gum input --header "$label" --header.foreground "6")
-  [ "$password" -eq 1 ] && cmd+=(--password)
-  [ -n "$initial" ] && cmd+=(--value "$initial")
-  cmd+=(--placeholder "$hint")
-
-  local tmpfile
-  tmpfile="$(mktemp)" || return 1
-  if "${cmd[@]}" < /dev/tty > "$tmpfile" 2>/dev/null; then
-    _GUM_RESULT="$(cat "$tmpfile")"
-    rm -f "$tmpfile"
-    return 0
-  fi
-  rm -f "$tmpfile"
-
-  # Fallback: shell read (gum unavailable or /dev/tty missing)
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━ $label ━━━")" >&2
-  [ -n "$hint" ] && printf '  %s\n' "$(_cc_d "$hint")" >&2
-  printf '\n' >&2
-  if [ -n "$initial" ]; then
-    printf '  %s %s\n' "$(_cc_d '当前值:')" "$(_cc_y "$(_mask_preview "$initial")")" >&2
-  fi
-  printf '  %s ' "$(_cc_d '输入新值 (回车保留):')" >&2
-  local answer
-  read -r answer || return 1
-  if [ -z "$answer" ] && [ -n "$initial" ]; then
-    _GUM_RESULT="$initial"
-  else
-    _GUM_RESULT="$answer"
-  fi
+_gum_interactive() { # 交互门:在渲染门基础上额外要求 /dev/tty 可用(gum input/confirm/filter 需要)
+  _has_gum && { : < /dev/tty; } 2>/dev/null
 }
 
-_ui_gum_confirm() { # _ui_gum_confirm <label1> <val1> <label2> <val2> ... -> 0 if confirmed
-  _ui_clear
-
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━━━━━━ 确认配置 ━━━━━━━━")" >&2
-  printf '\n' >&2
-
-  while [ $# -ge 2 ]; do
-    local label="$1" val="$2"; shift 2
-    local display
-    if [ -z "$val" ]; then
-      display="$(_cc_d '(未设置)')"
-    else
-      display="$(_cc_y "$(_mask_preview "$val")")"
+_ui_input() { # _ui_input <label> <hint> <initial> -> 结果写 stdout
+  local label="$1" hint="$2" initial="$3"
+  if _gum_interactive; then
+    local tmp; tmp="$(mktemp)" || return 1
+    if gum input --header "$label" --header.foreground 6 \
+         ${initial:+--value "$initial"} --placeholder "$hint" \
+         < /dev/tty > "$tmp" 2>/dev/tty; then
+      cat "$tmp"; rm -f "$tmp"; return 0
     fi
-    printf '       %s  %s: %s\n' "$(_cc_g '●')" "$(_cc_c "$label")" "$display" >&2
+    rm -f "$tmp"; return 1
+  fi
+  local ans
+  printf '  %s' "$(_cc_d "$label (回车保留 ${initial:-空}): ")" >&2
+  IFS= read -r ans || return 1
+  if [ -z "$ans" ]; then printf '%s\n' "$initial"; else printf '%s\n' "$ans"; fi
+}
+
+_ui_password() { # _ui_password <label> <hint> -> 结果写 stdout
+  local label="$1" hint="$2"
+  if _gum_interactive; then
+    local tmp; tmp="$(mktemp)" || return 1
+    if gum input --password --header "$label" --header.foreground 6 \
+         --placeholder "$hint" < /dev/tty > "$tmp" 2>/dev/tty; then
+      cat "$tmp"; rm -f "$tmp"; return 0
+    fi
+    rm -f "$tmp"; return 1
+  fi
+  local ans
+  printf '  %s' "$(_cc_d "$label: ")" >&2
+  IFS= read -rs ans || return 1
+  printf '%s\n' "$ans"
+}
+
+_ui_confirm() { # _ui_confirm <prompt> -> 0=确认 1=取消
+  local prompt="$1"
+  if _gum_interactive; then
+    gum confirm "$prompt" < /dev/tty >/dev/tty 2>&1
+    return $?
+  fi
+  local a
+  printf '  %s [Y/n] ' "$prompt" >&2
+  # 回退:读 y/n。注意 read 不加 `|| return 1` —— stdin 到达 EOF(非交互/headless,
+  # 如 new 向导被管道喂入定量空行)时视为"确认",与旧 _ui_wizard_confirm 语义一致。
+  # ⚠️ 共享原语:若未来给"破坏性操作"(如 rm)接入 _ui_confirm,EOF 默认确认是不安全的,
+  # 那种调用方应显式要求肯定输入,不要依赖此默认。
+  IFS= read -r a
+  case "$a" in n|N|no|NO) return 1 ;; *) return 0 ;; esac
+}
+
+_ui_pick() { # _ui_pick <prompt>  (候选从 stdin 逐行) -> 选中项写 stdout
+  local prompt="$1"
+  local -a opts=(); local line
+  while IFS= read -r line; do [ -n "$line" ] && opts+=("$line"); done
+  [ "${#opts[@]}" -gt 0 ] || return 1
+  if _gum_interactive; then
+    printf '%s\n' "${opts[@]}" | gum filter --header "$prompt" --header.foreground 6 2>/dev/tty
+    return $?
+  fi
+  local i
+  printf '  %s\n' "$(_cc_bc "$prompt")" >&2
+  for i in "${!opts[@]}"; do printf '    %d) %s\n' "$((i+1))" "${opts[$i]}" >&2; done
+  printf '  选择编号: ' >&2
+  # 优先从 /dev/tty 读(管道候选情况);无 tty 时把 stdin 最后一行当编号
+  local n
+  if { : < /dev/tty; } 2>/dev/null; then
+    IFS= read -r n < /dev/tty || return 1
+  else
+    # 非交互测试环境:opts 最后一项即用户输入的编号
+    n="${opts[$((${#opts[@]}-1))]}"
+    opts=("${opts[@]:0:$((${#opts[@]}-1))}")
+    [ "${#opts[@]}" -gt 0 ] || return 1
+    # 重新打印实际候选(之前打印了含编号的列表,用 stderr 更新)
+    printf '\r' >&2  # 视觉上无明显影响,无法回撤已输出行
+  fi
+  case "$n" in (*[!0-9]*|'') return 1 ;; esac
+  [ "$n" -ge 1 ] && [ "$n" -le "${#opts[@]}" ] || return 1
+  printf '%s\n' "${opts[$((n-1))]}"
+}
+
+_resolve_profile_arg() { # _resolve_profile_arg <usage_msg> [name] -> 选定名写 stdout
+  local usage="$1" name="${2:-}"
+  if [ -n "$name" ]; then printf '%s\n' "$name"; return 0; fi
+  local -a names=(); local f
+  for f in "$PROFILES_DIR"/*.env; do
+    [ -e "$f" ] || continue
+    names+=("$(basename "$f" .env)")
   done
-
-  printf '\n' >&2
-  gum confirm "确认保存以上配置?" < /dev/tty >/dev/null 2>&1 || \
-    { printf '  确认保存? [Y/n] ' >&2; local a; read -r a; case "$a" in n|N|no|NO) return 1 ;; esac; }
+  if [ "${#names[@]}" -gt 0 ] && _gum_interactive; then
+    local picked
+    picked="$(printf '%s\n' "${names[@]}" | _ui_pick "选择 profile")" || _die 2 "$usage"
+    [ -n "$picked" ] || _die 2 "$usage"
+    printf '%s\n' "$picked"; return 0
+  fi
+  _die 2 "$usage"
 }
 
-_ui_gum_timeline() { # _ui_gum_timeline — alias to _ui_wizard_timeline
-  _ui_wizard_timeline "$@"
-}
-
-_ui_gum_wizard() { # _ui_gum_wizard <mode> <name> <existing_file> <tok> <url> <opus> <opus_n> <sonnet> <sonnet_n> <haiku> <haiku_n> <subagent>
-  local mode="$1" name="$2" existing_file="$3"
-  local tok="$4" url="$5" opus="$6" opus_n="$7" sonnet="$8" sonnet_n="$9"
-  local haiku="${10}" haiku_n="${11}" subagent="${12}"
-
-  local pf; pf="$(_profile_path "$name")" || return $?
-
-  # ── Title ────────────────────────────────────────────────────────
-  local title_text
-  if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
-  else title_text="编辑 profile: $name"; fi
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━ $title_text ━━━")" >&2
-  printf '\n' >&2
-
-  # ── 5-step gum wizard ───────────────────────────────────────────
-  local step_total=5
-  local -a step_labels=("身份认证" "模型映射" "子代理" "自定义变量" "确认")
-
-  local result_tok result_url result_opus result_sonnet result_haiku result_subagent
-
-  # Step 1: Auth (Token + URL) — no clear, keep title visible
-  _ui_gum_timeline 1 "$step_total" "${step_labels[@]}"
-  _ui_gum_input "API Token" "sk-ant-..." "$tok" 1 || return 1
-  result_tok="$_GUM_RESULT"
-  _ui_gum_input "Base URL" "https://api.example.com/v1" "$url" 0 || return 1
-  result_url="$_GUM_RESULT"
-
-  local auth_summary="Token: $(_mask_preview "$result_tok")  URL: $(_mask_preview "$result_url")"
-
-  # Step 2: Models
-  _ui_clear
-  _ui_gum_timeline 2 "$step_total" "${step_labels[@]}" "$auth_summary"
-  _ui_gum_input "Opus 模型 ID" "claude-opus-4-8" "$opus" 0 || return 1
-  result_opus="$_GUM_RESULT"
-  _ui_gum_input "Sonnet 模型 ID" "claude-sonnet-4-6" "$sonnet" 0 || return 1
-  result_sonnet="$_GUM_RESULT"
-  _ui_gum_input "Haiku 模型 ID" "claude-haiku-4-5-20251001" "$haiku" 0 || return 1
-  result_haiku="$_GUM_RESULT"
-
-  local model_summary="Opus: $(_mask_preview "$result_opus")  Sonnet: $(_mask_preview "$result_sonnet")  Haiku: $(_mask_preview "$result_haiku")"
-
-  # Step 3: Subagent
-  _ui_clear
-  _ui_gum_timeline 3 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary"
-  _ui_gum_input "子代理模型 (可选)" "留空使用默认" "$subagent" 0 || return 1
-  result_subagent="$_GUM_RESULT"
-
-  local subagent_summary
-  if [ -n "$result_subagent" ]; then subagent_summary="$(_mask_preview "$result_subagent")"
-  else subagent_summary="(未设置)"; fi
-
-  # Step 4: Custom env vars
-  _ui_clear
-  _ui_gum_timeline 4 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary"
-
-  # Extract existing custom vars
-  local -a existing_keys=()
-  local -a existing_vals=()
-  if [ -n "$existing_file" ] && [ -f "$existing_file" ]; then
-    while IFS= read -r line; do
-      local ekey eval
-      ekey="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
-      [ -n "$ekey" ] || continue
-      eval="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*${ekey}=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
-      case "$ekey" in
-        ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|\
-        ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL_NAME|\
-        ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL_NAME|\
-        ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME|\
-        CLAUDE_CODE_SUBAGENT_MODEL) continue ;;
-      esac
-      existing_keys+=("$ekey")
-      existing_vals+=("$eval")
-    done < "$existing_file"
+_ui_say() { # _ui_say <title|ok|err|warn|info|dim> <text>  -> stdout(单次 gum fork)
+  local pal="$1"; shift; local text="$*"
+  if _has_gum; then
+    case "$pal" in
+      title) gum style --bold --foreground 6 -- "$text" ;;
+      ok)    gum style --foreground 2 -- "$text" ;;
+      err)   gum style --foreground 1 -- "$text" ;;
+      warn)  gum style --foreground 3 -- "$text" ;;
+      info|dim) gum style --foreground 8 -- "$text" ;;
+      *)     gum style -- "$text" ;;
+    esac
+    return
   fi
-
-  _add_custom_env_vars "$pf" existing_keys existing_vals
-
-  local custom_summary="(无)"
-  if [ "${#_CUSTOM_KEYS[@]}" -gt 0 ]; then
-    custom_summary=""
-    local i
-    for i in "${!_CUSTOM_KEYS[@]}"; do
-      [ -n "$custom_summary" ] && custom_summary+=" "
-      custom_summary+="${_CUSTOM_KEYS[$i]}=$(_mask_preview "${_CUSTOM_VALS[$i]}")"
-    done
+  if [ "$_cc_on" -eq 1 ]; then
+    case "$pal" in
+      title) printf '%s\n' "$(_cc_bc "$text")" ;;
+      ok)    printf '%s\n' "$(_cc_g "$text")" ;;
+      err)   printf '%s\n' "$(_cc_r "$text")" ;;
+      warn)  printf '%s\n' "$(_cc_y "$text")" ;;
+      info|dim) printf '%s\n' "$(_cc_d "$text")" ;;
+      *)     printf '%s\n' "$text" ;;
+    esac
+    return
   fi
-
-  # Step 5: Confirmation
-  _ui_gum_confirm \
-    "Auth Token" "$result_tok" \
-    "Base URL" "$result_url" \
-    "Opus Model" "$result_opus" \
-    "Sonnet Model" "$result_sonnet" \
-    "Haiku Model" "$result_haiku" \
-    "Subagent" "$result_subagent" \
-    || return 1
-
-  # ── Write profile ───────────────────────────────────────────────
-  _write_profile "$pf" "$result_tok" "$result_url" \
-    "$result_opus" "" "$result_sonnet" "" "$result_haiku" "" "$result_subagent"
-
-  # ── Complete ─────────────────────────────────────────────────────
-  _ui_clear
-  _ui_gum_timeline $((step_total + 1)) "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_g "✓ profile $name 已保存")" >&2
-  printf '\n' >&2
+  printf '%s\n' "$text"
 }
 
 _ui_wizard_timeline() { # _ui_wizard_timeline <current> <total> "label1" "label2" ... [<summaries>...]
@@ -464,50 +415,6 @@ _ui_wizard_timeline() { # _ui_wizard_timeline <current> <total> "label1" "label2
       printf '  %s  %s  %s\n' "$(_cc_c '◎')" "$(_cc_bc "${labels[$i]}")" "$conn" >&2
     fi
   done
-}
-
-_ui_wizard_content() { # _ui_wizard_content <hint> <initial> -> stdout result
-  local hint="$1" initial="$2"
-  # 7 spaces align with timeline label position (2sp + dot + 2sp + 2sp)
-  [ -n "$hint" ] && printf '       %s\n' "$(_cc_d "$hint")" >&2
-  if [ -n "$initial" ]; then
-    printf '       %s %s\n' "$(_cc_d '当前值:')" "$(_cc_y "$(_mask_preview "$initial")")" >&2
-  fi
-  printf '       %s ' "$(_cc_d '输入新值 (回车保留):')" >&2
-
-  local answer
-  read -r answer || return 1
-  if [ -z "$answer" ] && [ -n "$initial" ]; then
-    printf '%s' "$initial"
-  else
-    printf '%s' "$answer"
-  fi
-}
-
-_ui_wizard_confirm() { # _ui_wizard_confirm <label1> <val1> <label2> <val2> ...
-  printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━━━━━━ 确认配置 ━━━━━━━━")" >&2
-  printf '\n' >&2
-
-  while [ $# -ge 2 ]; do
-    local label="$1" val="$2"; shift 2
-    local display
-    if [ -z "$val" ]; then
-      display="$(_cc_d '(未设置)')"
-    else
-      display="$(_cc_y "$(_mask_preview "$val")")"
-    fi
-    printf '       %s  %s: %s\n' "$(_cc_g '●')" "$(_cc_c "$label")" "$display" >&2
-  done
-  printf '\n' >&2
-  printf '       %s %s' "$(_cc_y "?")" "确认保存以上配置? [Y/n] " >&2
-
-  local ans
-  read -r ans
-  case "$ans" in
-    n|N|no|NO) return 1 ;;
-    *) return 0 ;;
-  esac
 }
 
 _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [existing_file]
@@ -544,19 +451,12 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
 
   local pf; pf="$(_profile_path "$name")" || return $?
 
-  # ── Dispatch to gum UI if available ─────────────────────────────
-  if _has_gum; then
-    _ui_gum_wizard "$mode" "$name" "$existing_file" \
-      "$tok" "$url" "$opus" "$opus_n" "$sonnet" "$sonnet_n" "$haiku" "$haiku_n" "$subagent"
-    return $?
-  fi
-
   # ── Title ────────────────────────────────────────────────────────
   local title_text
   if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
   else title_text="编辑 profile: $name"; fi
   printf '\n' >&2
-  printf '  %s\n' "$(_cc_bc "━━━ $title_text ━━━")" >&2
+  _ui_say title "━━━ $title_text ━━━" >&2
   printf '\n' >&2
 
   # ── 5-step wizard ───────────────────────────────────────────────
@@ -568,9 +468,9 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   # Step 1: Auth (Token + URL merged)
   printf '\n' >&2
   _ui_wizard_timeline 1 "$step_total" "${step_labels[@]}"
-  result_tok="$(_ui_wizard_content "API Token" "$tok")" || return 1
-  printf '\n' >&2
-  result_url="$(_ui_wizard_content "Base URL" "$url")" || return 1
+  result_tok="$(_ui_password "API Token" "sk-ant-...")" || return 1
+  [ -n "$result_tok" ] || result_tok="$tok"
+  result_url="$(_ui_input "Base URL" "https://api.example.com/v1" "$url")" || return 1
 
   # Build auth summary for completed step display
   local auth_summary="Token: $(_mask_preview "$result_tok")  URL: $(_mask_preview "$result_url")"
@@ -578,16 +478,16 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   # Step 2: Models (3 main models only, _NAME hidden)
   _ui_clear
   _ui_wizard_timeline 2 "$step_total" "${step_labels[@]}" "$auth_summary"
-  result_opus="$(_ui_wizard_content "Opus 模型 ID" "$opus")" || return 1
-  result_sonnet="$(_ui_wizard_content "Sonnet 模型 ID" "$sonnet")" || return 1
-  result_haiku="$(_ui_wizard_content "Haiku 模型 ID" "$haiku")" || return 1
+  result_opus="$(_ui_input "Opus 模型 ID" "claude-opus-4-8" "$opus")" || return 1
+  result_sonnet="$(_ui_input "Sonnet 模型 ID" "claude-sonnet-4-6" "$sonnet")" || return 1
+  result_haiku="$(_ui_input "Haiku 模型 ID" "claude-haiku-4-5-20251001" "$haiku")" || return 1
 
   local model_summary="Opus: $(_mask_preview "$result_opus")  Sonnet: $(_mask_preview "$result_sonnet")  Haiku: $(_mask_preview "$result_haiku")"
 
   # Step 3: Subagent
   _ui_clear
   _ui_wizard_timeline 3 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary"
-  result_subagent="$(_ui_wizard_content "子代理模型 (留空使用默认)" "$subagent")" || return 1
+  result_subagent="$(_ui_input "子代理模型 (留空使用默认)" "" "$subagent")" || return 1
 
   local subagent_summary
   if [ -n "$result_subagent" ]; then subagent_summary="$(_mask_preview "$result_subagent")"
@@ -635,14 +535,13 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   _ui_clear
   _ui_wizard_timeline 5 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
 
-  _ui_wizard_confirm \
-    "Auth Token" "$result_tok" \
-    "Base URL" "$result_url" \
-    "Opus Model" "$result_opus" \
-    "Sonnet Model" "$result_sonnet" \
-    "Haiku Model" "$result_haiku" \
-    "Subagent" "$result_subagent" \
-    || return 1
+  _ui_say title "━━━━━━━━ 确认配置 ━━━━━━━━" >&2
+  _ui_say dim "Token: $(_mask_preview "$result_tok")" >&2
+  _ui_say dim "URL:   $(_mask_preview "$result_url")" >&2
+  _ui_say dim "Opus:  $result_opus" >&2
+  _ui_say dim "Sonnet: $result_sonnet" >&2
+  _ui_say dim "Haiku: $result_haiku" >&2
+  _ui_confirm "确认保存以上配置?" || return 1
 
   # ── Write profile ───────────────────────────────────────────────
   _write_profile "$pf" "$result_tok" "$result_url" \
@@ -652,7 +551,7 @@ _interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [exis
   _ui_clear
   _ui_wizard_timeline $((step_total + 1)) "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
   printf '\n' >&2
-  printf '  %s\n' "$(_cc_g "✓ profile $name 已保存")" >&2
+  _ui_say ok "✓ profile $name 已保存" >&2
   printf '\n' >&2
 }
 
@@ -828,17 +727,24 @@ _add_custom_env_vars_read() { # _add_custom_env_vars_read <profile_file> keys_re
 cmd_list() {
   _ensure_skeleton
   local found=0 f name url line
+  local -a rows=()
   for f in "$PROFILES_DIR"/*.env; do
     [ -e "$f" ] || continue
     found=1
     name="$(basename "$f" .env)"
     line="$(grep -E '^[[:space:]]*export[[:space:]]+ANTHROPIC_BASE_URL=' "$f" | head -1)"
-    url="${line#*=}"
-    url="${url%\"}"; url="${url#\"}"
-    url="${url%\'}"; url="${url#\'}"
-    printf '%-20s %s\n' "$name" "${url:-(no base_url)}"
+    url="${line#*=}"; url="${url%\"}"; url="${url#\"}"; url="${url%\'}"; url="${url#\'}"
+    rows+=("$(printf '%-20s %s' "$name" "${url:-(no base_url)}")")
   done
-  [ "$found" -eq 1 ] || echo "(暂无 profile,用 'ccm new <name>' 创建)"
+  if [ "$found" -ne 1 ]; then
+    _ui_say dim "(暂无 profile,用 'ccm new <name>' 创建)"
+    return
+  fi
+  if _has_gum; then
+    printf '%s\n' "${rows[@]}" | gum style --foreground 7
+  else
+    printf '%s\n' "${rows[@]}"
+  fi
 }
 
 cmd_new() {
@@ -849,17 +755,16 @@ cmd_new() {
   [ -f "$pf" ] && _die 1 "profile '$name' 已存在(用 'ccm edit $name')"
 
   if _interactive_profile "new" "$name"; then
-    printf '%s %s\n' "$(_cc_g '✓')" "已创建 $(_cc_c "$pf")"
+    _ui_say ok "✓ 已创建 $pf"
   else
     rm -f "$pf"
-    printf '%s 已取消\n' "$(_cc_r '✖')" >&2
+    _ui_say err "✖ 已取消" >&2
     exit 1
   fi
 }
 
 cmd_edit() {
-  local name="$1"
-  [ -n "$name" ] || _die 2 "用法: ccm edit <profile>"
+  local name; name="$(_resolve_profile_arg "用法: ccm edit <profile>" "$1")" || exit $?
   local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在(用 'ccm new $name')"
 
@@ -867,13 +772,13 @@ cmd_edit() {
   _rotate_backups "$pf"
 
   if _interactive_profile "edit" "$name" "$pf"; then
-    printf '%s %s\n' "$(_cc_g '✓')" "已更新 $(_cc_c "$pf")"
+    _ui_say ok "✓ 已更新 $pf"
     # Show backup hint if backups exist
     if [ -f "${pf}.back.1" ]; then
-      printf '  %s 使用 %s 查看备份记录\n' "$(_cc_d '💡')" "$(_cc_c "ccm backup-list $name")"
+      _ui_say info "💡 使用 ccm backup-list $name 查看备份记录"
     fi
   else
-    printf '%s 已取消，未保存更改\n' "$(_cc_r '✖')" >&2
+    _ui_say err "✖ 已取消，未保存更改" >&2
     exit 1
   fi
 }
@@ -887,7 +792,7 @@ cmd_show() {
       *) [ -z "$name" ] && name="$a" || _die 2 "多余参数: $a" ;;
     esac
   done
-  [ -n "$name" ] || _die 2 "用法: ccm show <profile> [--raw]"
+  [ -n "$name" ] || name="$(_resolve_profile_arg "用法: ccm show <profile> [--raw]")" || exit $?
   local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
   if [ "$raw" -eq 1 ]; then
@@ -895,7 +800,8 @@ cmd_show() {
     return
   fi
   # 打码显示: token 掩码,其余原样
-  local line val
+  local line val k v rendered
+  rendered="$(
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       *ANTHROPIC_AUTH_TOKEN=*)
@@ -912,7 +818,6 @@ cmd_show() {
         ;;
       *export\ ANTHROPIC_DEFAULT_*|*export\ CLAUDE_CODE_SUBAGENT_MODEL*)
         # Standard model vars: show key + colored value
-        local k v
         k="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
         v="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*[A-Z_][A-Z0-9_]*=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
         if [ -n "$k" ] && [ -n "$v" ]; then
@@ -923,7 +828,6 @@ cmd_show() {
         ;;
       *export\ *CLAUDE_CODE_*|*export\ *BASH_*|*export\ *API_*|*export\ *MCP_*|*export\ *DEBUG*|*export\ *DISABLE_*|*export\ *ENABLE_*|*export\ *MAX_*|*export\ *HTTP_*|*export\ *NO_*)
         # Custom env vars: show key + yellow value
-        local k v
         k="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
         v="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*[A-Z_][A-Z0-9_]*=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
         if [ -n "$k" ] && [ -n "$v" ]; then
@@ -945,6 +849,12 @@ cmd_show() {
       *) printf '%s\n' "$line" ;;
     esac
   done <"$pf"
+  )"
+  if _has_gum; then
+    printf '%s\n' "$rendered" | gum style --foreground 7
+  else
+    printf '%s\n' "$rendered"
+  fi
 }
 
 cmd_env() {
@@ -994,14 +904,13 @@ cmd_envref() {
 }
 
 cmd_rm() {
-  local name="$1"
-  [ -n "$name" ] || _die 2 "用法: ccm rm <profile>"
+  local name; name="$(_resolve_profile_arg "用法: ccm rm <profile>" "$1")" || exit $?
   local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
   printf "%s确认删除 profile '%s'? [y/N] " "$(_cc_r '⚠ ')" "$name"
   local ans; read -r ans
   case "$ans" in
-    y|Y|yes|YES) rm -f "$pf"; printf '%s %s\n' "$(_cc_r '✖')" "已删除 $(_cc_r "$name")" ;;
+    y|Y|yes|YES) rm -f "$pf"; _ui_say ok "✓ 已删除 $name" ;;
     *) echo "已取消" ;;
   esac
 }
@@ -1012,23 +921,24 @@ cmd_backup_list() {
   local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] || _die 1 "profile '$name' 不存在"
 
-  printf '\n  %s\n' "$(_cc_bc "━━━ profile: $name 的备份 ━━━")"
+  printf '\n'
+  _ui_say title "━━━ profile: $name 的备份 ━━━"
   printf '\n'
 
   if _list_backups "$pf" "$name"; then
     printf '\n'
-    printf '  %s\n' "$(_cc_d '💡 回滚: ccm backup-restore '"$name"' <序号>')"
+    _ui_say info "💡 回滚: ccm backup-restore $name <序号>"
     printf '\n'
   else
-    printf '  %s\n' "$(_cc_d '(暂无备份)')"
+    _ui_say dim "(暂无备份)"
     printf '\n'
   fi
 }
 
 cmd_backup_restore() {
-  local name="$1" n="$2"
-  [ -n "$name" ] || _die 2 "用法: ccm backup-restore <profile> <N>"
+  local n="$2"
   [ -n "$n" ] || _die 2 "用法: ccm backup-restore <profile> <N>"
+  local name; name="$(_resolve_profile_arg "用法: ccm backup-restore <profile> <N>" "$1")" || exit $?
 
   # Validate N is a number
   case "$n" in
@@ -1049,9 +959,9 @@ cmd_backup_restore() {
 
   _restore_backup "$pf" "$n"
 
-  printf '%s 已回滚 %s 到 back.%s\n' "$(_cc_g '✓')" "$(_cc_c "$pf")" "$n"
-  printf '  %s 当前版本已保存为 back.1\n' "$(_cc_d '💡')"
-  printf '  %s 使用 %s 查看备份记录\n' "$(_cc_d '💡')" "$(_cc_c "ccm backup-list $name")"
+  _ui_say ok "✓ 已回滚 $pf 到 back.$n"
+  _ui_say info "💡 当前版本已保存为 back.1"
+  _ui_say info "💡 使用 ccm backup-list $name 查看备份记录"
 }
 
 usage_run() {
@@ -1073,7 +983,9 @@ cmd_run() {
     esac
   done
 
-  if [ -z "$profile" ]; then usage_run; exit 2; fi
+  if [ -z "$profile" ]; then
+    profile="$(_resolve_profile_arg "$(usage_run 2>&1)")" || exit $?
+  fi
 
   local pf; pf="$(_profile_path "$profile")" || exit $?
   if [ ! -f "$pf" ]; then
@@ -1165,4 +1077,4 @@ main() {
   esac
 }
 
-main "$@"
+[ -n "${CCM_SOURCED:-}" ] || main "$@"
