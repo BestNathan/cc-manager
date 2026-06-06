@@ -38,5 +38,11 @@ mkdir -p "$STUBDIR"; make_gum_stub "$STUBDIR"
 out="$(PATH="$STUBDIR:$PATH" GUM_STUB_OUT=/dev/null bash -c 'CCM_SOURCED=1 . "'"$CCM_BIN"'"; _ui_say ok "已保存"')"
 assert_contains "_ui_say gum 渲染" "[gum]" "$out"
 
+# _resolve_profile_arg: 给名字原样返回
+out="$(_resolve_profile_arg "用法: x" "myprof")"
+assert_eq "_resolve_profile_arg 给名返回" "myprof" "$out"
+# 缺名 + 无 gum(CCM_NO_GUM=1)→ _die 2(子shell 捕获退出码)
+( CCM_NO_GUM=1; _resolve_profile_arg "用法: x" >/dev/null 2>&1 ); assert_eq "_resolve_profile_arg 缺名无gum退出2" "2" "$?"
+
 teardown
 finish
