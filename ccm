@@ -254,13 +254,12 @@ _ui_clear() { # _ui_clear — clear screen + cursor home (ANSI escape)
   printf '\033[2J\033[H' >&2
 }
 
-_has_gum() { # _has_gum -> 0 if gum is available and stdin is a TTY
-  # gum input/confirm require /dev/tty. In interactive use stdin is the
-  # terminal, so -t 0 is a reliable gate. When stdin is not a TTY
-  # (piped input, CI, tests), the shell fallback in _ui_gum_input and
-  # _ui_gum_confirm handles the rare case where -t 0 is true but gum
-  # still fails.
-  [ -z "${CCM_NO_GUM:-}" ] && command -v gum >/dev/null 2>&1 && [ -t 0 ]
+_has_gum() { # 渲染门:gum 可执行且未被禁用(不要求 TTY,gum style/format 输出 ANSI 到管道也可)
+  [ -z "${CCM_NO_GUM:-}" ] && command -v gum >/dev/null 2>&1
+}
+
+_gum_interactive() { # 交互门:在渲染门基础上额外要求 /dev/tty 可用(gum input/confirm/filter 需要)
+  _has_gum && { : < /dev/tty; } 2>/dev/null
 }
 
 _ui_gum_input() { # _ui_gum_input <label> <hint> <initial> <password:0|1> -> writes to _GUM_RESULT
@@ -1176,4 +1175,4 @@ main() {
   esac
 }
 
-main "$@"
+[ -n "${CCM_SOURCED:-}" ] || main "$@"
