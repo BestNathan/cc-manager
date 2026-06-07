@@ -328,6 +328,36 @@ _ui_password_quiet() { # _ui_password_quiet <placeholder> -> 结果写 stdout
   printf '%s\n' "$ans"
 }
 
+# 统一字段输入: gum --prompt 同行标签 + 回退 read
+# 用法: _gum_field <prompt> <initial> [--password] -> 结果写 stdout
+# 空输入返回 initial(回退路径), gum 路径 gum 本身处理空值
+_gum_field() { # _gum_field <prompt> <initial> [--password] -> 结果写 stdout
+  local prompt="$1" initial="$2" pw=0
+  [ "${3:-}" = "--password" ] && pw=1
+  if _gum_interactive; then
+    local tmp; tmp="$(mktemp)" || return 1
+    local -a args=(--prompt "$prompt")
+    [ -n "$initial" ] && args+=(--value "$initial")
+    [ "$pw" -eq 1 ] && args+=(--password)
+    if gum input "${args[@]}" < /dev/tty > "$tmp" 2>/dev/tty; then
+      cat "$tmp"; rm -f "$tmp"; return 0
+    fi
+    rm -f "$tmp"; return 1
+  fi
+  # ── fallback: plain read ──
+  if [ "$pw" -eq 1 ]; then
+    printf '  %s' "$(_cc_d "$prompt")" >&2
+    local ans
+    IFS= read -rs ans || return 1
+    if [ -z "$ans" ]; then printf '%s\n' "$initial"; else printf '%s\n' "$ans"; fi
+    return 0
+  fi
+  printf '  %s' "$(_cc_d "$prompt")" >&2
+  local ans
+  IFS= read -r ans || return 1
+  if [ -z "$ans" ]; then printf '%s\n' "$initial"; else printf '%s\n' "$ans"; fi
+}
+
 _ui_confirm() { # _ui_confirm <prompt> -> 0=确认 1=取消
   local prompt="$1"
   if _gum_interactive; then

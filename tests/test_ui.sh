@@ -44,5 +44,17 @@ assert_eq "_resolve_profile_arg 给名返回" "myprof" "$out"
 # 缺名 + 无 gum(CCM_NO_GUM=1)→ _die 2(子shell 捕获退出码)
 ( CCM_NO_GUM=1; _resolve_profile_arg "用法: x" >/dev/null 2>&1 ); assert_eq "_resolve_profile_arg 缺名无gum退出2" "2" "$?"
 
+# _gum_field 回退路径 (CCM_NO_GUM=1)
+export CCM_NO_GUM=1
+out="$(printf '\n' | _gum_field "Name: " "DEFLT")"
+assert_eq "_gum_field 空回车保留默认" "DEFLT" "$out"
+out="$(printf 'ALICE\n' | _gum_field "Name: " "DEFLT")"
+assert_eq "_gum_field 输入覆盖" "ALICE" "$out"
+out="$(printf 'secret\n' | _gum_field "Pwd: " "" "--password")"
+assert_eq "_gum_field password 读取" "secret" "$out"
+out="$(printf '\n' | _gum_field "Pwd: " "DEFAULT_TOKEN" "--password")"
+assert_eq "_gum_field password 空回车保留默认" "DEFAULT_TOKEN" "$out"
+unset CCM_NO_GUM
+
 teardown
 finish
