@@ -674,6 +674,114 @@ _add_custom_env_vars_read() { # _add_custom_env_vars_read <profile_file> keys_re
 }
 
 
+_interactive_new() { # _interactive_new <name>
+  local name="$1"
+  local pf; pf="$(_profile_path "$name")" || return $?
+
+  # ── Defaults ──────────────────────────────────────────────────────
+  local tok="<YOUR_TOKEN_HERE>"
+  local url="<https://your-gateway.example.com>"
+  local opus="claude-opus-4-8"
+  local sonnet="claude-sonnet-4-6"
+  local haiku="claude-haiku-4-5-20251001"
+  local subagent=""
+
+  local title_text="新建 profile: $name"
+
+  # ── Step 1: 核心配置 (Token + URL + 3 models) ─────────────────────
+  _ui_say title "━━━ $title_text ━━━" >&2
+  _ui_say dim "Step 1/3 — 核心配置" >&2
+  printf '\n' >&2
+
+  tok="$(_gum_field "API Token: " "$tok" --password)" || return 1
+  url="$(_gum_field "Base URL: " "$url")" || return 1
+  opus="$(_gum_field "Opus 模型: " "$opus")" || return 1
+  sonnet="$(_gum_field "Sonnet 模型: " "$sonnet")" || return 1
+  haiku="$(_gum_field "Haiku 模型: " "$haiku")" || return 1
+
+  # ── Step 2: 可选配置 ──────────────────────────────────────────────
+  _ui_say title "━━━ $title_text ━━━" >&2
+  _ui_say dim "Step 2/3 — 可选配置 (ESC 跳过)" >&2
+  printf '\n' >&2
+
+  subagent="$(_gum_field "子代理模型 (留空跳过): " "$subagent")" || true
+
+  # Custom env vars via gum filter
+  _resolve_env_ref
+  local -a ckeys=() cvals=()
+  if [ -n "$_ENV_REF" ] && _gum_interactive; then
+    while true; do
+      local cand_list
+      cand_list="$(
+        while IFS='|' read -r k c d; do
+          [ -z "$k" ] && continue
+          local skip=0
+          for ek in "${ckeys[@]}"; do
+            [ "$ek" = "$k" ] && { skip=1; break; }
+          done
+          [ "$skip" -eq 1 ] && continue
+          printf '%s  —  [%s] %s\n' "$k" "$c" "$d"
+        done < <(_search_env_ref "")
+      )"
+      [ -z "$cand_list" ] && break
+
+      local picked
+      picked="$(printf '%s\n' "$cand_list" | gum filter \
+        --header "搜索环境变量 (ESC 完成)" --header.foreground 6 \
+        --placeholder "输入关键词..." --height 8 --limit 1 2>/dev/tty)" || break
+      [ -n "$picked" ] || break
+
+      local key="${picked%% *}"
+      if ! printf '%s' "$key" | grep -qE '^[A-Z][A-Z0-9_]*$'; then
+        _ui_say warn "无效选择: $key" >&2; continue
+      fi
+
+      local desc
+      desc="$(grep "^${key}|" "$_ENV_REF" 2>/dev/null | head -1 | cut -d'|' -f3)"
+      [ -n "$desc" ] && _ui_say dim "  $desc" >&2
+
+      local val
+      val="$(_gum_field "$key: " "")" || continue
+      [ -n "$val" ] || { _ui_say dim "值为空，跳过" >&2; continue; }
+
+      ckeys+=("$key"); cvals+=("$val")
+      _ui_say ok "✓ $key 已添加" >&2
+    done
+  fi
+
+  # ── Step 3: 确认 ──────────────────────────────────────────────────
+  _ui_say title "━━━━━━━━ 确认配置 ━━━━━━━━" >&2
+  printf '\n' >&2
+  _ui_say dim "Token:   $(_mask_preview "$tok")" >&2
+  _ui_say dim "URL:     $(_mask_preview "$url")" >&2
+  _ui_say dim "Opus:    $opus" >&2
+  _ui_say dim "Sonnet:  $sonnet" >&2
+  _ui_say dim "Haiku:   $haiku" >&2
+  _ui_say dim "Subagent: ${subagent:-(未设置)}" >&2
+  if [ "${#ckeys[@]}" -gt 0 ]; then
+    local ci
+    for ci in "${!ckeys[@]}"; do
+      _ui_say dim "${ckeys[$ci]}=$(_mask_preview "${cvals[$ci]}")" >&2
+    done
+  fi
+  printf '\n' >&2
+  _ui_confirm "确认保存以上配置?" || return 1
+
+  # ── Write profile ─────────────────────────────────────────────────
+  _write_profile "$pf" "$tok" "$url" "$opus" "" "$sonnet" "" "$haiku" "" "$subagent"
+
+  # Append custom vars
+  if [ "${#ckeys[@]}" -gt 0 ]; then
+    local ci
+    for ci in "${!ckeys[@]}"; do
+      printf 'export %s=%s\n' "${ckeys[$ci]}" "$(printf '%s' "${cvals[$ci]}" | sed "s/'/'\\\''/g")" >> "$pf"
+    done
+  fi
+
+  printf '\n' >&2
+  _ui_say ok "✓ profile $name 已保存" >&2
+}
+
 cmd_list() {
   _ensure_skeleton
   local found=0 f name url line
@@ -704,7 +812,7 @@ cmd_new() {
   local pf; pf="$(_profile_path "$name")" || exit $?
   [ -f "$pf" ] && _die 1 "profile '$name' 已存在(用 'ccm edit $name')"
 
-  if _interactive_profile "new" "$name"; then
+  if _interactive_new "$name"; then
     _ui_say ok "✓ 已创建 $pf"
   else
     rm -f "$pf"
