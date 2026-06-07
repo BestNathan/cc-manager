@@ -295,6 +295,39 @@ _ui_password() { # _ui_password <label> <hint> -> 结果写 stdout
   printf '%s\n' "$ans"
 }
 
+# 安静版: 不渲染 gum header,label 由调用方通过 _ui_say 独立输出到 stderr
+_ui_input_quiet() { # _ui_input_quiet <placeholder> [initial] -> 结果写 stdout
+  local placeholder="$1" initial="${2:-}"
+  if _gum_interactive; then
+    local tmp; tmp="$(mktemp)" || return 1
+    if gum input --placeholder "$placeholder" ${initial:+--value "$initial"} \
+         < /dev/tty > "$tmp" 2>/dev/tty; then
+      cat "$tmp"; rm -f "$tmp"; return 0
+    fi
+    rm -f "$tmp"; return 1
+  fi
+  local ans
+  printf '  %s' "$(_cc_d "(回车保留 ${initial:-空}): ")" >&2
+  IFS= read -r ans || return 1
+  if [ -z "$ans" ]; then printf '%s\n' "$initial"; else printf '%s\n' "$ans"; fi
+}
+
+_ui_password_quiet() { # _ui_password_quiet <placeholder> -> 结果写 stdout
+  local placeholder="$1"
+  if _gum_interactive; then
+    local tmp; tmp="$(mktemp)" || return 1
+    if gum input --password --placeholder "$placeholder" \
+         < /dev/tty > "$tmp" 2>/dev/tty; then
+      cat "$tmp"; rm -f "$tmp"; return 0
+    fi
+    rm -f "$tmp"; return 1
+  fi
+  local ans
+  printf '  %s' "$(_cc_d "输入: ")" >&2
+  IFS= read -rs ans || return 1
+  printf '%s\n' "$ans"
+}
+
 _ui_confirm() { # _ui_confirm <prompt> -> 0=确认 1=取消
   local prompt="$1"
   if _gum_interactive; then
@@ -385,177 +418,6 @@ _ui_say() { # _ui_say <title|ok|err|warn|info|dim> <text>  -> stdout(单次 gum 
   printf '%s\n' "$text"
 }
 
-_ui_wizard_timeline() { # _ui_wizard_timeline <current> <total> "label1" "label2" ... [<summaries>...]
-  # current: 当前步骤号(1-based), total: 总步数
-  # labels: total 个标签
-  # summaries: 额外参数，每个 completed 步骤的摘要文本（空表示无摘要）
-  local current="$1" total="$2"; shift 2
-  local -a labels=()
-  while [ "$#" -gt 0 ] && [ ${#labels[@]} -lt "$total" ]; do
-    labels+=("$1"); shift
-  done
-  # Remaining args are summaries (one per completed step)
-  local -a summaries=("$@")
-
-  local i conn
-  for ((i = 0; i < total; i++)); do
-    # Don't show future steps beyond current
-    if [ $((i + 1)) -gt "$current" ]; then break; fi
-
-    if [ $((i + 1)) -eq "$total" ]; then conn=" "; else conn="│"; fi
-
-    local summary=""
-    if [ $((i + 1)) -lt "$current" ] && [ $i -lt ${#summaries[@]} ]; then
-      summary="  ${summaries[$i]}"
-    fi
-
-    if [ $((i + 1)) -lt "$current" ]; then
-      printf '  %s  %s  %s%s\n' "$(_cc_g '●')" "$(_cc_g "${labels[$i]}")" "$conn" "$(_cc_d "$summary")" >&2
-    elif [ $((i + 1)) -eq "$current" ]; then
-      printf '  %s  %s  %s\n' "$(_cc_c '◎')" "$(_cc_bc "${labels[$i]}")" "$conn" >&2
-    fi
-  done
-}
-
-_interactive_profile() { # _interactive_profile <mode:"new"|"edit"> <name> [existing_file]
-  local mode="$1" name="$2" existing_file="${3:-}"
-
-  # ── Load initial values ─────────────────────────────────────────
-  local tok url opus opus_n sonnet sonnet_n haiku haiku_n subagent
-
-  if [ -n "$existing_file" ] && [ -f "$existing_file" ]; then
-    tok="$(_parse_env_value "$existing_file" ANTHROPIC_AUTH_TOKEN)"
-    url="$(_parse_env_value "$existing_file" ANTHROPIC_BASE_URL)"
-    opus="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_OPUS_MODEL)"
-    opus_n="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_OPUS_MODEL_NAME)"
-    sonnet="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_SONNET_MODEL)"
-    sonnet_n="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_SONNET_MODEL_NAME)"
-    haiku="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_HAIKU_MODEL)"
-    haiku_n="$(_parse_env_value "$existing_file" ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME)"
-    subagent="$(_parse_env_value "$existing_file" CLAUDE_CODE_SUBAGENT_MODEL)"
-    # Clear redundant _NAME vars
-    [ "$opus_n" = "$opus" ] && opus_n=""
-    [ "$sonnet_n" = "$sonnet" ] && sonnet_n=""
-    [ "$haiku_n" = "$haiku" ] && haiku_n=""
-  else
-    tok="<YOUR_TOKEN_HERE>"
-    url="<https://your-gateway.example.com>"
-    opus="claude-opus-4-8"
-    opus_n=""
-    sonnet="claude-sonnet-4-6"
-    sonnet_n=""
-    haiku="claude-haiku-4-5-20251001"
-    haiku_n=""
-    subagent=""
-  fi
-
-  local pf; pf="$(_profile_path "$name")" || return $?
-
-  # ── Title ────────────────────────────────────────────────────────
-  local title_text
-  if [ "$mode" = "new" ]; then title_text="新建 profile: $name"
-  else title_text="编辑 profile: $name"; fi
-  printf '\n' >&2
-  _ui_say title "━━━ $title_text ━━━" >&2
-  printf '\n' >&2
-
-  # ── 5-step wizard ───────────────────────────────────────────────
-  local step_total=5
-  local -a step_labels=("身份认证" "模型映射" "子代理" "自定义变量" "确认")
-
-  local result_tok result_url result_opus result_sonnet result_haiku result_subagent
-
-  # Step 1: Auth (Token + URL merged)
-  printf '\n' >&2
-  _ui_wizard_timeline 1 "$step_total" "${step_labels[@]}"
-  result_tok="$(_ui_password "API Token" "sk-ant-...")" || return 1
-  [ -n "$result_tok" ] || result_tok="$tok"
-  result_url="$(_ui_input "Base URL" "https://api.example.com/v1" "$url")" || return 1
-
-  # Build auth summary for completed step display
-  local auth_summary="Token: $(_mask_preview "$result_tok")  URL: $(_mask_preview "$result_url")"
-
-  # Step 2: Models (3 main models only, _NAME hidden)
-  _ui_clear
-  _ui_wizard_timeline 2 "$step_total" "${step_labels[@]}" "$auth_summary"
-  result_opus="$(_ui_input "Opus 模型 ID" "claude-opus-4-8" "$opus")" || return 1
-  result_sonnet="$(_ui_input "Sonnet 模型 ID" "claude-sonnet-4-6" "$sonnet")" || return 1
-  result_haiku="$(_ui_input "Haiku 模型 ID" "claude-haiku-4-5-20251001" "$haiku")" || return 1
-
-  local model_summary="Opus: $(_mask_preview "$result_opus")  Sonnet: $(_mask_preview "$result_sonnet")  Haiku: $(_mask_preview "$result_haiku")"
-
-  # Step 3: Subagent
-  _ui_clear
-  _ui_wizard_timeline 3 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary"
-  result_subagent="$(_ui_input "子代理模型 (留空使用默认)" "" "$subagent")" || return 1
-
-  local subagent_summary
-  if [ -n "$result_subagent" ]; then subagent_summary="$(_mask_preview "$result_subagent")"
-  else subagent_summary="(未设置)"; fi
-
-  # Step 4: Custom env vars (integrated into timeline)
-  # Extract existing custom vars
-  local -a existing_keys=()
-  local -a existing_vals=()
-  if [ -n "$existing_file" ] && [ -f "$existing_file" ]; then
-    while IFS= read -r line; do
-      local ekey eval
-      ekey="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
-      [ -n "$ekey" ] || continue
-      eval="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*${ekey}=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
-      case "$ekey" in
-        ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|\
-        ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL_NAME|\
-        ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL_NAME|\
-        ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME|\
-        CLAUDE_CODE_SUBAGENT_MODEL) continue ;;
-      esac
-      existing_keys+=("$ekey")
-      existing_vals+=("$eval")
-    done < "$existing_file"
-  fi
-
-  _ui_clear
-  _ui_wizard_timeline 4 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary"
-
-  _add_custom_env_vars "$pf" existing_keys existing_vals
-
-  # Build custom vars summary
-  local custom_summary="(无)"
-  if [ "${#_CUSTOM_KEYS[@]}" -gt 0 ]; then
-    custom_summary=""
-    local i
-    for i in "${!_CUSTOM_KEYS[@]}"; do
-      [ -n "$custom_summary" ] && custom_summary+=" "
-      custom_summary+="${_CUSTOM_KEYS[$i]}=$(_mask_preview "${_CUSTOM_VALS[$i]}")"
-    done
-  fi
-
-  # Step 5: Confirmation
-  _ui_clear
-  _ui_wizard_timeline 5 "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
-
-  _ui_say title "━━━━━━━━ 确认配置 ━━━━━━━━" >&2
-  _ui_say dim "Token: $(_mask_preview "$result_tok")" >&2
-  _ui_say dim "URL:   $(_mask_preview "$result_url")" >&2
-  _ui_say dim "Opus:  $result_opus" >&2
-  _ui_say dim "Sonnet: $result_sonnet" >&2
-  _ui_say dim "Haiku: $result_haiku" >&2
-  _ui_confirm "确认保存以上配置?" || return 1
-
-  # ── Write profile ───────────────────────────────────────────────
-  _write_profile "$pf" "$result_tok" "$result_url" \
-    "$result_opus" "" "$result_sonnet" "" "$result_haiku" "" "$result_subagent"
-
-  # ── Complete ─────────────────────────────────────────────────────
-  _ui_clear
-  _ui_wizard_timeline $((step_total + 1)) "$step_total" "${step_labels[@]}" "$auth_summary" "$model_summary" "$subagent_summary" "$custom_summary"
-  printf '\n' >&2
-  _ui_say ok "✓ profile $name 已保存" >&2
-  printf '\n' >&2
-}
-
-
 # ─── Environment variable reference and custom var addition ──────────
 
 _resolve_env_ref() { # -> sets _ENV_REF to path of env_ref.txt
@@ -608,36 +470,33 @@ _add_custom_env_vars_read() { # _add_custom_env_vars_read <profile_file> keys_re
   # ── Phase 1: Review & edit existing custom vars ─────────────────────
   if [ "${#ekeys[@]}" -gt 0 ]; then
     printf '\n' >&2
-    printf '  %s\n' "$(_cc_bc '━━━ 现有自定义环境变量 ━━━')" >&2
+    _ui_say title "━━━ 现有自定义环境变量 ━━━" >&2
     printf '\n' >&2
     local i=0
     while [ "$i" -lt "${#ekeys[@]}" ]; do
       local key="${ekeys[$i]}"
       local val="${evals[$i]}"
-      printf '  %s %s  =  %s\n' "$(_cc_g '●')" "$(_cc_c "$key")" "$(_cc_y "$(_mask_preview "$val")")" >&2
+      _ui_say dim "  ${key} = $(_mask_preview "$val")" >&2
       i=$((i + 1))
     done
-    printf '\n  %s\n' "$(_cc_d '逐行编辑: 回车保留 | 输入新值覆盖 | --delete 删除')" >&2
-    printf '  %s\n' "$(_cc_d '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')" >&2
+    printf '\n' >&2
+    _ui_say dim "逐行编辑: 回车保留 | 输入新值覆盖 | --delete 删除" >&2
     printf '\n' >&2
 
     i=0
     while [ "$i" -lt "${#ekeys[@]}" ]; do
       local key="${ekeys[$i]}"
       local val="${evals[$i]}"
-      printf '  ✏️  %s\n' "$(_cc_c "$key")" >&2
-      printf '     当前值: %s\n' "$(_cc_y "$(_mask_preview "$val")")" >&2
-      printf '     新值: ' >&2
       local answer
-      read -r answer
+      answer="$(_ui_input "编辑 $key" "回车保留, --delete 删除" "$val")" || { i=$((i + 1)); continue; }
       if [ "$answer" = "--delete" ] || [ "$answer" = "--del" ] || [ "$answer" = "--rm" ]; then
-        printf '     %s 已删除\n' "$(_cc_r '✖')" >&2
+        _ui_say warn "✖ $key 已删除" >&2
         unset 'ekeys[$i]' 'evals[$i]'
-      elif [ -n "$answer" ]; then
+      elif [ "$answer" != "$val" ]; then
         evals[$i]="$answer"
-        printf '     %s 已更新\n' "$(_cc_g '✓')" >&2
+        _ui_say ok "✓ $key 已更新" >&2
       else
-        printf '     %s 保留原值\n' "$(_cc_d '·')" >&2
+        _ui_say dim "· $key 保留原值" >&2
       fi
       i=$((i + 1))
     done
@@ -653,70 +512,131 @@ _add_custom_env_vars_read() { # _add_custom_env_vars_read <profile_file> keys_re
   fi
 
   # ── Phase 2: Add new custom vars ────────────────────────────────────
-  while true; do
-    # Search
-    if [ -n "$_ENV_REF" ]; then
-      printf '\n  %s\n' "$(_cc_bc '━━━ 搜索/添加环境变量 ━━━')" >&2
-      printf '  关键词%s: ' "$(_cc_d ' (留空显示全部)')" >&2
-      local query
-      read -r query
-      if [ -n "$query" ]; then
-        local results
-        results="$(_search_env_ref "$query")"
-        if [ -n "$results" ]; then
-          printf '\n  %s\n' "$(_cc_d '搜索结果')" >&2
-          while IFS='|' read -r key cat desc; do
-            printf '    %s  %s\n' "$(_cc_c "$key")" "$(_cc_d "$desc")" >&2
-          done <<< "$results"
-          printf '\n' >&2
-        else
-          printf '  %s 未找到匹配项\n\n' "$(_cc_r '✖')" >&2
-        fi
-      else
-        printf '\n  %s (前 50 项)\n' "$(_cc_d '全部环境变量')" >&2
-        local total_count
-        total_count="$(_search_env_ref "" | wc -l | tr -d ' ')"
-        _search_env_ref "" | head -50 | while IFS='|' read -r key cat desc; do
-          printf '    %s  %s\n' "$(_cc_c "$key")" "$(_cc_d "$desc")" >&2
-        done
-        printf '  %s\n\n' "$(_cc_d "... 共 $total_count 项, 输入关键词可缩小范围")" >&2
+  if [ -n "$_ENV_REF" ] && _gum_interactive; then
+    # ── Gum path: inline fuzzy filter + select + value ──────────────
+    while true; do
+      # Build candidate list (exclude already-added keys), format for filter
+      local cand_list
+      cand_list="$(
+        while IFS='|' read -r k c d; do
+          [ -z "$k" ] && continue
+          local skip=0
+          for ek in "${ekeys[@]}"; do
+            [ "$ek" = "$k" ] && { skip=1; break; }
+          done
+          [ "$skip" -eq 1 ] && continue
+          printf '%s  —  [%s] %s\n' "$k" "$c" "$d"
+        done < <(_search_env_ref "")
+      )"
+
+      if [ -z "$cand_list" ]; then
+        _ui_say dim "所有已知环境变量已添加" >&2
+        printf '\n' >&2
+        break
       fi
-    fi
 
-    printf '  ➕ 变量名%s: ' "$(_cc_d ' (留空结束)')" >&2
-    local key
-    read -r key
-    [ -n "$key" ] || break
+      printf '\n' >&2
+      local picked
+      picked="$(printf '%s\n' "$cand_list" | gum filter \
+        --header "搜索环境变量 (ESC 完成, Ctrl+C 取消)" \
+        --header.foreground 6 \
+        --placeholder "输入关键词筛选..." \
+        --height 8 --limit 1 \
+        2>/dev/tty)" || break  # ESC → exit loop, Ctrl+C → cancel
 
-    # Validate
-    if ! printf '%s' "$key" | grep -qE '^[A-Z][A-Z0-9_]*$'; then
-      printf '  %s 无效的变量名: %s\n\n' "$(_cc_r '✖')" "$(_cc_r "$key")" >&2
-      continue
-    fi
+      [ -n "$picked" ] || break
 
-    # Check if already exists
-    local found=0
-    for ek in "${ekeys[@]}"; do
-      [ "$ek" = "$key" ] && { found=1; break; }
-    done
-    [ "$found" -eq 1 ] && { printf '  %s 变量 %s 已存在\n\n' "$(_cc_r '✖')" "$(_cc_r "$key")" >&2; continue; }
+      # Extract key (first space-delimited token)
+      local key="${picked%% *}"
 
-    # Get description
-    if [ -n "$_ENV_REF" ]; then
+      # Validate key format
+      if ! printf '%s' "$key" | grep -qE '^[A-Z][A-Z0-9_]*$'; then
+        _ui_say warn "无效选择: $key" >&2
+        continue
+      fi
+
+      # Show description from env_ref
       local desc
       desc="$(grep "^${key}|" "$_ENV_REF" 2>/dev/null | head -1 | cut -d'|' -f3)"
-      [ -n "$desc" ] && printf '  %s %s\n' "$(_cc_d '└─')" "$(_cc_d "$desc")" >&2
-    fi
+      [ -n "$desc" ] && _ui_say dim "  $desc" >&2
 
-    printf '  💎 %s 值: ' "$(_cc_c "$key")" >&2
-    local val
-    read -r val
-    [ -n "$val" ] || { printf '  %s 值为空，跳过\n\n' "$(_cc_d '·')" >&2; continue; }
+      # Prompt for value using existing gum-enabled _ui_input
+      local val
+      val="$(_ui_input "$key" "输入值..." "")" || continue
+      [ -n "$val" ] || { _ui_say dim "值为空，跳过" >&2; continue; }
 
-    ekeys+=("$key")
-    evals+=("$val")
-    printf '  %s 已添加\n' "$(_cc_g '✓')" >&2
-  done
+      ekeys+=("$key")
+      evals+=("$val")
+      _ui_say ok "✓ $key 已添加" >&2
+    done
+
+  else
+    # ── Fallback: plain text search + manual entry ──────────────────
+    while true; do
+      # Search
+      if [ -n "$_ENV_REF" ]; then
+        printf '\n  %s\n' "$(_cc_bc '━━━ 搜索/添加环境变量 ━━━')" >&2
+        printf '  关键词%s: ' "$(_cc_d ' (留空显示全部)')" >&2
+        local query
+        read -r query
+        if [ -n "$query" ]; then
+          local results
+          results="$(_search_env_ref "$query")"
+          if [ -n "$results" ]; then
+            printf '\n  %s\n' "$(_cc_d '搜索结果')" >&2
+            while IFS='|' read -r fkey fcat fdesc; do
+              printf '    %s  %s\n' "$(_cc_c "$fkey")" "$(_cc_d "$fdesc")" >&2
+            done <<< "$results"
+            printf '\n' >&2
+          else
+            printf '  %s 未找到匹配项\n\n' "$(_cc_r '✖')" >&2
+          fi
+        else
+          printf '\n  %s (前 50 项)\n' "$(_cc_d '全部环境变量')" >&2
+          local total_count
+          total_count="$(_search_env_ref "" | wc -l | tr -d ' ')"
+          _search_env_ref "" | head -50 | while IFS='|' read -r fkey fcat fdesc; do
+            printf '    %s  %s\n' "$(_cc_c "$fkey")" "$(_cc_d "$fdesc")" >&2
+          done
+          printf '  %s\n\n' "$(_cc_d "... 共 $total_count 项, 输入关键词可缩小范围")" >&2
+        fi
+      fi
+
+      printf '  ➕ 变量名%s: ' "$(_cc_d ' (留空结束)')" >&2
+      local key
+      read -r key
+      [ -n "$key" ] || break
+
+      # Validate
+      if ! printf '%s' "$key" | grep -qE '^[A-Z][A-Z0-9_]*$'; then
+        printf '  %s 无效的变量名: %s\n\n' "$(_cc_r '✖')" "$(_cc_r "$key")" >&2
+        continue
+      fi
+
+      # Check if already exists
+      local found=0
+      for ek in "${ekeys[@]}"; do
+        [ "$ek" = "$key" ] && { found=1; break; }
+      done
+      [ "$found" -eq 1 ] && { printf '  %s 变量 %s 已存在\n\n' "$(_cc_r '✖')" "$(_cc_r "$key")" >&2; continue; }
+
+      # Get description
+      if [ -n "$_ENV_REF" ]; then
+        local desc
+        desc="$(grep "^${key}|" "$_ENV_REF" 2>/dev/null | head -1 | cut -d'|' -f3)"
+        [ -n "$desc" ] && printf '  %s %s\n' "$(_cc_d '└─')" "$(_cc_d "$desc")" >&2
+      fi
+
+      printf '  💎 %s 值: ' "$(_cc_c "$key")" >&2
+      local val
+      read -r val
+      [ -n "$val" ] || { printf '  %s 值为空，跳过\n\n' "$(_cc_d '·')" >&2; continue; }
+
+      ekeys+=("$key")
+      evals+=("$val")
+      printf '  %s 已添加\n' "$(_cc_g '✓')" >&2
+    done
+  fi
 
   # Return via globals
   _CUSTOM_KEYS=("${ekeys[@]}")
