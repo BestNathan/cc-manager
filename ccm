@@ -295,39 +295,6 @@ _ui_password() { # _ui_password <label> <hint> -> 结果写 stdout
   printf '%s\n' "$ans"
 }
 
-# 安静版: 不渲染 gum header,label 由调用方通过 _ui_say 独立输出到 stderr
-_ui_input_quiet() { # _ui_input_quiet <placeholder> [initial] -> 结果写 stdout
-  local placeholder="$1" initial="${2:-}"
-  if _gum_interactive; then
-    local tmp; tmp="$(mktemp)" || return 1
-    if gum input --placeholder "$placeholder" ${initial:+--value "$initial"} \
-         < /dev/tty > "$tmp" 2>/dev/tty; then
-      cat "$tmp"; rm -f "$tmp"; return 0
-    fi
-    rm -f "$tmp"; return 1
-  fi
-  local ans
-  printf '  %s' "$(_cc_d "(回车保留 ${initial:-空}): ")" >&2
-  IFS= read -r ans || return 1
-  if [ -z "$ans" ]; then printf '%s\n' "$initial"; else printf '%s\n' "$ans"; fi
-}
-
-_ui_password_quiet() { # _ui_password_quiet <placeholder> -> 结果写 stdout
-  local placeholder="$1"
-  if _gum_interactive; then
-    local tmp; tmp="$(mktemp)" || return 1
-    if gum input --password --placeholder "$placeholder" \
-         < /dev/tty > "$tmp" 2>/dev/tty; then
-      cat "$tmp"; rm -f "$tmp"; return 0
-    fi
-    rm -f "$tmp"; return 1
-  fi
-  local ans
-  printf '  %s' "$(_cc_d "输入: ")" >&2
-  IFS= read -rs ans || return 1
-  printf '%s\n' "$ans"
-}
-
 # 统一字段输入: gum --prompt 同行标签 + 回退 read
 # 用法: _gum_field <prompt> <initial> [--password] -> 结果写 stdout
 # 空输入返回 initial(回退路径), gum 路径 gum 本身处理空值

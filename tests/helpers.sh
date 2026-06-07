@@ -72,6 +72,7 @@ sub="$1"; shift
 case "$sub" in
   style|format|join|log) printf '[gum]%s\n' "${*: -1}" ;;
   input|filter|write)    printf '%s\n' "${GUM_STUB_REPLY:-}" ;;
+	  choose)                printf '%s\n' "${GUM_STUB_CHOOSE:-}" ;;
   confirm)               exit "${GUM_STUB_CONFIRM:-0}" ;;
   *)                     : ;;
 esac
