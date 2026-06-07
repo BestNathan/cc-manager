@@ -782,6 +782,200 @@ _interactive_new() { # _interactive_new <name>
   _ui_say ok "✓ profile $name 已保存" >&2
 }
 
+
+_interactive_edit() { # _interactive_edit <name> <profile_file>
+  local name="$1" pf="$2"
+
+  # ── Load current values ───────────────────────────────────────────
+  local tok url opus sonnet haiku subagent
+  tok="$(_parse_env_value "$pf" ANTHROPIC_AUTH_TOKEN)"
+  url="$(_parse_env_value "$pf" ANTHROPIC_BASE_URL)"
+  opus="$(_parse_env_value "$pf" ANTHROPIC_DEFAULT_OPUS_MODEL)"
+  sonnet="$(_parse_env_value "$pf" ANTHROPIC_DEFAULT_SONNET_MODEL)"
+  haiku="$(_parse_env_value "$pf" ANTHROPIC_DEFAULT_HAIKU_MODEL)"
+  subagent="$(_parse_env_value "$pf" CLAUDE_CODE_SUBAGENT_MODEL)"
+
+  # Track originals for diff
+  local orig_tok="$tok" orig_url="$url" orig_opus="$opus"
+  local orig_sonnet="$sonnet" orig_haiku="$haiku" orig_subagent="$subagent"
+
+  # ── Load custom vars ──────────────────────────────────────────────
+  local -a ckeys=() cvals=()
+  local -a orig_ckeys=() orig_cvals=()
+  if [ -f "$pf" ]; then
+    while IFS= read -r line; do
+      local ekey eval
+      ekey="$(printf '%s' "$line" | sed -n 's/^[[:space:]]*export[[:space:]]*\([A-Z_][A-Z0-9_]*\)=.*/\1/p')"
+      [ -n "$ekey" ] || continue
+      eval="$(printf '%s' "$line" | sed -n "s/^[[:space:]]*export[[:space:]]*${ekey}=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}$/\1/p")"
+      case "$ekey" in
+        ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|\
+        ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL_NAME|\
+        ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL_NAME|\
+        ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME|\
+        CLAUDE_CODE_SUBAGENT_MODEL) continue ;;
+      esac
+      ckeys+=("$ekey"); cvals+=("$eval")
+      orig_ckeys+=("$ekey"); orig_cvals+=("$eval")
+    done < "$pf"
+  fi
+
+  local title_text="编辑 profile: $name"
+
+  # ── Main menu loop ────────────────────────────────────────────────
+  while true; do
+    _ui_say title "━━━ $title_text ━━━" >&2
+    printf '\n' >&2
+
+    local section
+    if _gum_interactive; then
+      section="$(printf '%s\n' \
+        "身份认证" \
+        "模型映射" \
+        "子代理" \
+        "自定义环境变量" \
+        "确认修改" \
+        "取消" \
+        | gum choose --header "选择要编辑的章节" --header.foreground 6 2>/dev/tty)" || { section="取消"; }
+    else
+      # Fallback: numbered list
+      _ui_say dim "1) 身份认证  2) 模型映射  3) 子代理  4) 自定义变量" >&2
+      _ui_say dim "5) 确认修改  6) 取消" >&2
+      local choice
+      printf '  选择: ' >&2
+      IFS= read -r choice
+      case "$choice" in
+        1) section="身份认证" ;;
+        2) section="模型映射" ;;
+        3) section="子代理" ;;
+        4) section="自定义环境变量" ;;
+        5) section="确认修改" ;;
+        *) section="取消" ;;
+      esac
+    fi
+
+    case "$section" in
+      身份认证)
+        _ui_say title "━━━ 身份认证 ━━━" >&2; printf '\n' >&2
+        tok="$(_gum_field "API Token: " "$tok" --password)" || continue
+        url="$(_gum_field "Base URL: " "$url")" || continue
+        _ui_say ok "✓ 身份认证已更新" >&2
+        ;;
+      模型映射)
+        _ui_say title "━━━ 模型映射 ━━━" >&2; printf '\n' >&2
+        opus="$(_gum_field "Opus 模型: " "$opus")" || continue
+        sonnet="$(_gum_field "Sonnet 模型: " "$sonnet")" || continue
+        haiku="$(_gum_field "Haiku 模型: " "$haiku")" || continue
+        _ui_say ok "✓ 模型映射已更新" >&2
+        ;;
+      子代理)
+        _ui_say title "━━━ 子代理 ━━━" >&2; printf '\n' >&2
+        subagent="$(_gum_field "子代理模型 (留空使用默认): " "$subagent")" || continue
+        _ui_say ok "✓ 子代理已更新" >&2
+        ;;
+      自定义环境变量)
+        _resolve_env_ref
+        _add_custom_env_vars "$pf" ckeys cvals
+        ckeys=("${_CUSTOM_KEYS[@]}")
+        cvals=("${_CUSTOM_VALS[@]}")
+        ;;
+      确认修改)
+        # ── Build diff ─────────────────────────────────────────────
+        local has_diff=0
+        _ui_say title "━━━━━━━━ 变更摘要 ━━━━━━━━" >&2
+        printf '\n' >&2
+
+        # Token diff
+        if [ "$orig_tok" != "$tok" ]; then
+          has_diff=1
+          _ui_say dim "  Token: $(_cc_r "$(_mask_preview "$orig_tok")") → $(_cc_g "$(_mask_preview "$tok")")" >&2
+        else
+          _ui_say dim "  Token: $(_mask_preview "$tok") (未变)" >&2
+        fi
+
+        # URL diff
+        if [ "$orig_url" != "$url" ]; then
+          has_diff=1
+          _ui_say dim "  URL: $(_cc_r "$(_mask_preview "$orig_url")") → $(_cc_g "$(_mask_preview "$url")")" >&2
+        else
+          _ui_say dim "  URL: $(_mask_preview "$url") (未变)" >&2
+        fi
+
+        # Opus diff
+        if [ "$orig_opus" != "$opus" ]; then
+          has_diff=1
+          _ui_say dim "  Opus: $(_cc_r "$orig_opus") → $(_cc_g "$opus")" >&2
+        else
+          _ui_say dim "  Opus: $opus (未变)" >&2
+        fi
+
+        # Sonnet diff
+        if [ "$orig_sonnet" != "$sonnet" ]; then
+          has_diff=1
+          _ui_say dim "  Sonnet: $(_cc_r "$orig_sonnet") → $(_cc_g "$sonnet")" >&2
+        else
+          _ui_say dim "  Sonnet: $sonnet (未变)" >&2
+        fi
+
+        # Haiku diff
+        if [ "$orig_haiku" != "$haiku" ]; then
+          has_diff=1
+          _ui_say dim "  Haiku: $(_cc_r "$orig_haiku") → $(_cc_g "$haiku")" >&2
+        else
+          _ui_say dim "  Haiku: $haiku (未变)" >&2
+        fi
+
+        # Subagent diff
+        if [ "$orig_subagent" != "$subagent" ]; then
+          has_diff=1
+          _ui_say dim "  Subagent: $(_cc_r "${orig_subagent:-(未设置)}") → $(_cc_g "${subagent:-(未设置)}")" >&2
+        else
+          _ui_say dim "  Subagent: ${subagent:-(未设置)} (未变)" >&2
+        fi
+
+        # Custom vars diff
+        local ci cj
+        for ci in "${!ckeys[@]}"; do
+          local old_val="" new_val="${cvals[$ci]}"
+          for cj in "${!orig_ckeys[@]}"; do
+            [ "${orig_ckeys[$cj]}" = "${ckeys[$ci]}" ] && { old_val="${orig_cvals[$cj]}"; break; }
+          done
+          if [ "$old_val" != "$new_val" ]; then
+            has_diff=1
+            _ui_say dim "  ${ckeys[$ci]}: $(_cc_r "$(_mask_preview "$old_val")") → $(_cc_g "$(_mask_preview "$new_val")")" >&2
+          else
+            _ui_say dim "  ${ckeys[$ci]}: $(_mask_preview "$new_val") (未变)" >&2
+          fi
+        done
+
+        printf '\n' >&2
+        if [ "$has_diff" -eq 0 ]; then
+          _ui_say dim "(无变更)" >&2
+        fi
+
+        _ui_confirm "确认保存以上修改?" || continue
+
+        # ── Write profile ─────────────────────────────────────────
+        _write_profile "$pf" "$tok" "$url" "$opus" "" "$sonnet" "" "$haiku" "" "$subagent"
+        if [ "${#ckeys[@]}" -gt 0 ]; then
+          local ci
+          for ci in "${!ckeys[@]}"; do
+            printf 'export %s=%s\n' "${ckeys[$ci]}" "$(printf '%s' "${cvals[$ci]}" | sed "s/'/'\\\''/g")" >> "$pf"
+          done
+        fi
+
+        printf '\n' >&2
+        _ui_say ok "✓ profile $name 已保存" >&2
+        return 0
+        ;;
+      *)
+        _ui_say dim "已取消" >&2
+        return 1
+        ;;
+    esac
+  done
+}
+
 cmd_list() {
   _ensure_skeleton
   local found=0 f name url line
@@ -829,7 +1023,7 @@ cmd_edit() {
   # Backup current file before editing
   _rotate_backups "$pf"
 
-  if _interactive_profile "edit" "$name" "$pf"; then
+  if _interactive_edit "$name" "$pf"; then
     _ui_say ok "✓ 已更新 $pf"
     # Show backup hint if backups exist
     if [ -f "${pf}.back.1" ]; then
