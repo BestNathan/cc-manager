@@ -75,7 +75,7 @@ _is_piped() {
 _download_remote() {
   local tmpdir
   tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ccm-install.XXXXXX")"
-  echo "→ 下载必要文件到 $tmpdir ..."
+  echo "→ 下载必要文件到 $tmpdir ..." >&2
 
   local base="https://raw.githubusercontent.com/BestNathan/cc-manager/$CCM_BRANCH"
   local files=("ccm" "install.sh" "template.env" "env_ref.txt" "completions/_ccm")
@@ -93,9 +93,9 @@ _download_remote() {
 
 # Clone 源码到 CCM_SRC_DIR
 _clone_repo() {
-  echo "→ Clone 仓库 $CCM_REPO → $CCM_SRC_DIR ..."
+  echo "→ Clone 仓库 $CCM_REPO → $CCM_SRC_DIR ..." >&2
   if [ -d "$CCM_SRC_DIR/.git" ]; then
-    echo "✓ 仓库已存在,拉取最新代码..."
+    echo "✓ 仓库已存在,拉取最新代码..." >&2
     git -C "$CCM_SRC_DIR" pull --rebase --quiet 2>/dev/null || true
   else
     git clone --quiet --branch "$CCM_BRANCH" "$CCM_REPO" "$CCM_SRC_DIR" 2>/dev/null
@@ -103,7 +103,7 @@ _clone_repo() {
       echo "✗ Clone 失败,请检查网络或手动: git clone $CCM_REPO $CCM_SRC_DIR" >&2
       return 1
     fi
-    echo "✓ Clone 完成"
+    echo "✓ Clone 完成" >&2
   fi
   printf '%s\n' "$CCM_SRC_DIR"
   return 0
@@ -200,6 +200,12 @@ _install_optional_deps() {
 # ---------------------------------------------------------------------------
 _install() {
   local src_dir="$1"
+
+  # 防御：src_dir 必须是包含 ccm 的单行有效目录（避免被污染的 stdout 拼进路径）
+  if [ -z "$src_dir" ] || [ ! -d "$src_dir" ] || [ ! -f "$src_dir/ccm" ]; then
+    echo "✗ 无效的源码目录: '$src_dir'（未找到 ccm）" >&2
+    exit 1
+  fi
 
   # 0. 可选依赖（不阻断）
   _install_optional_deps
